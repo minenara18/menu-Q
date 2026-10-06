@@ -1,0 +1,11 @@
+import { Module } from '@nestjs/common';
+import { WebsocketGateway } from './websocket.gateway';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule } from '@nestjs/config';
+
+@Module({
+  imports: [JwtModule.register({}), ConfigModule],
+  providers: [WebsocketGateway],
+  exports: [WebsocketGateway],
+})
+export class WebsocketModule {}

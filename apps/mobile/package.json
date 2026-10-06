@@ -1,0 +1,19 @@
+{
+  "name": "order-q-mobile",
+  "version": "1.0.0",
+  "main": "App.tsx",
+  "scripts": {
+    "dev": "expo start",
+    "build": "expo export",
+    "lint": "eslint . --ext .ts,.tsx",
+    "test": "jest"
+  },
+  "dependencies": {
+    "expo": "~51.0.0",
+    "react": "18.2.0",
+    "react-native": "0.74.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
