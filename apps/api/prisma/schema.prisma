@@ -1,0 +1,426 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CASHIER
+  MAKER
+  OWNER
+}
+
+enum TicketStatus {
+  DRAFT
+  PENDING_PAYMENT
+  ORDERED
+  IN_PROGRESS
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+enum SubTicketStatus {
+  ORDERED
+  IN_PROGRESS
+  READY
+  CANCELLED
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+}
+
+enum PaymentMethod {
+  CASH
+  QRIS
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum StationCode {
+  BAR
+  KITCHEN
+  PASTRY
+}
+
+enum StockMoveReason {
+  SALE
+  REFUND
+  OPNAME
+  RECEIVE
+  ADJUSTMENT
+  WASTE
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum MenuAvailability {
+  AVAILABLE
+  LOW_STOCK
+  UNAVAILABLE
+}
+
+model Outlet {
+  id            String   @id @default(uuid())
+  name          String
+  address       String?
+  phone         String?
+  taxRate       Float    @default(0.11)
+  serviceRate   Float    @default(0.05)
+  currency      String   @default("IDR")
+  timezone      String   @default("Asia/Jakarta")
+  receiptHeader String?
+  receiptFooter String?
+  lowStockThreshold Int  @default(5)
+  varianceThreshold Float @default(10000)
+  partialReadyPolicy String @default("WAIT_ALL") // WAIT_ALL | CALL_PER_STATION
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users         User[]
+  shifts        Shift[]
+  categories    Category[]
+  stations      Station[]
+  menus         Menu[]
+  ingredients   Ingredient[]
+  tickets       Ticket[]
+  auditLogs     AuditLog[]
+  deviceOutbox  DeviceOutbox[]
+  settings      OutletSetting[]
+
+  @@index([name])
+}
+
+model User {
+  id        String   @id @default(uuid())
+  outletId  String
+  name      String
+  pinHash   String
+  role      UserRole
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  outlet    Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  shiftsOpened   Shift[] @relation("ShiftOpenedBy")
+  shiftsClosed   Shift[] @relation("ShiftClosedBy")
+  stockMoves     StockMove[]
+  auditLogs      AuditLog[]
+
+  @@unique([outletId, name])
+  @@index([outletId])
+  @@index([role])
+}
+
+model Shift {
+  id           String      @id @default(uuid())
+  outletId     String
+  openedBy     String
+  closedBy     String?
+  openedAt     DateTime    @default(now())
+  closedAt     DateTime?
+  openingCash  Float       @default(0)
+  expectedCash Float?
+  countedCash  Float?
+  variance     Float?
+  varianceNote String?
+  status       ShiftStatus @default(OPEN)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  outlet       Outlet      @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  openedByUser User        @relation("ShiftOpenedBy", fields: [openedBy], references: [id])
+  closedByUser User?       @relation("ShiftClosedBy", fields: [closedBy], references: [id])
+  tickets      Ticket[]
+  cashCounts   CashCount[]
+
+  @@index([outletId, status])
+  @@index([openedAt])
+}
+
+model Category {
+  id          String   @id @default(uuid())
+  outletId    String
+  name        String
+  displayOrder Int     @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  outlet      Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  menus       Menu[]
+
+  @@unique([outletId, name])
+  @@index([outletId, displayOrder])
+}
+
+model Station {
+  id          String       @id @default(uuid())
+  outletId    String
+  code        StationCode
+  name        String
+  displayOrder Int         @default(0)
+  slaMinutes  Int          @default(15)
+  isActive    Boolean      @default(true)
+  color       String       @default("#2563EB")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  outlet      Outlet       @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  menus       Menu[]
+  subtickets  SubTicket[]
+
+  @@unique([outletId, code])
+  @@index([outletId, displayOrder])
+}
+
+model Menu {
+  id              String           @id @default(uuid())
+  outletId        String
+  categoryId      String
+  stationId       String
+  name            String
+  description     String?
+  price           Int              // in smallest currency unit (rupiah)
+  imageUrl        String?
+  displayOrder    Int              @default(0)
+  isActive        Boolean          @default(true)
+  availability    MenuAvailability @default(AVAILABLE)
+  avgMakeSeconds  Int              @default(180)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  outlet          Outlet           @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  category        Category         @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  station         Station          @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  recipeLines     RecipeLine[]
+  orderItems      OrderItem[]
+
+  @@index([outletId, isActive, stationId])
+  @@index([categoryId])
+  @@index([stationId])
+}
+
+model Ingredient {
+  id            String   @id @default(uuid())
+  outletId      String
+  name          String
+  unit          String
+  currentQty    Float    @default(0)
+  minThreshold  Float    @default(0)
+  costPerUnit   Float?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  outlet        Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  recipeLines   RecipeLine[]
+  stockMoves    StockMove[]
+
+  @@unique([outletId, name])
+  @@index([outletId])
+}
+
+model RecipeLine {
+  id              String  @id @default(uuid())
+  menuId          String
+  ingredientId    String
+  qtyPerPortion   Float
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  menu            Menu    @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  ingredient      Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@unique([menuId, ingredientId])
+  @@index([menuId])
+  @@index([ingredientId])
+}
+
+model StockMove {
+  id          String           @id @default(uuid())
+  outletId    String
+  ingredientId String
+  qtyDelta    Float
+  reason      StockMoveReason
+  refId       String?
+  refType     String?
+  createdBy   String
+  createdAt   DateTime         @default(now())
+
+  outlet      Outlet           @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  ingredient  Ingredient       @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  user        User             @relation(fields: [createdBy], references: [id])
+
+  @@index([outletId, ingredientId, createdAt])
+  @@index([refId, refType])
+  @@index([reason])
+}
+
+model Ticket {
+  id              String       @id @default(uuid())
+  outletId        String
+  shiftId         String
+  dailyNo         Int
+  ticketNumber    String       // formatted: A-043
+  customerName    String?
+  orderType       OrderType
+  tableNumber     String?
+  status          TicketStatus @default(DRAFT)
+  etaMin          Int?
+  etaMax          Int?
+  subtotal        Int          @default(0)
+  taxAmount       Int          @default(0)
+  serviceAmount   Int          @default(0)
+  discountAmount  Int          @default(0)
+  totalAmount     Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  outlet          Outlet       @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  shift           Shift        @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  subtickets      SubTicket[]
+  orderItems      OrderItem[]
+  payments        Payment[]
+
+  @@unique([shiftId, dailyNo])
+  @@unique([ticketNumber, shiftId])
+  @@index([outletId, shiftId, status])
+  @@index([outletId, createdAt])
+  @@index([status])
+  @@index([dailyNo])
+}
+
+model SubTicket {
+  id            String           @id @default(uuid())
+  ticketId      String
+  stationId     String
+  status        SubTicketStatus  @default(ORDERED)
+  startedAt     DateTime?
+  readyAt       DateTime?
+  priorityScore Float            @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  ticket        Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  station       Station          @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  orderItems    OrderItem[]
+
+  @@index([ticketId])
+  @@index([stationId, status])
+  @@index([stationId, priorityScore])
+}
+
+model OrderItem {
+  id            String   @id @default(uuid())
+  ticketId      String
+  menuId        String
+  subticketId   String?
+  qty           Int
+  priceSnapshot Int
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  ticket        Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  menu          Menu     @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  subticket     SubTicket? @relation(fields: [subticketId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId])
+  @@index([menuId])
+  @@index([subticketId])
+}
+
+model Payment {
+  id            String         @id @default(uuid())
+  ticketId      String
+  method        PaymentMethod
+  amount        Int
+  status        PaymentStatus  @default(PENDING)
+  splitGroupId  String?
+  qrisRef       String?
+  qrisPayload   Json?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  ticket        Ticket         @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([qrisRef])
+  @@index([splitGroupId])
+  @@index([status])
+}
+
+model CashCount {
+  id          String  @id @default(uuid())
+  shiftId     String
+  denomination Int
+  count       Int
+  createdAt   DateTime @default(now())
+
+  shift       Shift   @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@unique([shiftId, denomination])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  outletId  String
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String
+  diff      Json?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  outlet    Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([outletId, entity, entityId])
+  @@index([outletId, createdAt])
+  @@index([actorId])
+}
+
+model DeviceOutbox {
+  id          String   @id @default(uuid())
+  outletId    String
+  deviceId    String
+  payload     Json
+  seq         Int
+  status      String   @default("pending") // pending | synced | failed
+  lastAttemptAt DateTime?
+  error       String?
+  createdAt   DateTime @default(now())
+
+  outlet      Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, seq])
+  @@index([outletId, status])
+  @@index([deviceId])
+}
+
+model OutletSetting {
+  id        String   @id @default(uuid())
+  outletId  String   @unique
+  key       String
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  outlet    Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([outletId, key])
+}
