@@ -100,6 +100,7 @@ model Outlet {
   auditLogs     AuditLog[]
   deviceOutbox  DeviceOutbox[]
   settings      OutletSetting[]
+  stockMoves    StockMove[]
 
   @@index([name])
 }

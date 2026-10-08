@@ -45,13 +45,13 @@ export class PaymentsService {
       throw new NotFoundException('Ticket not found');
     }
 
-    const pendingPayment = ticket.payments.find((p: typeof ticket.payments[0]) => p.method === PaymentMethod.QRIS && p.status === PaymentStatus.PENDING);
+    const pendingPayment = ticket.payments.find((p: typeof ticket.payments[0]) => p.method === 'QRIS' && p.status === 'PENDING');
     if (!pendingPayment) {
       throw new BadRequestException('No pending QRIS payment for this ticket');
     }
 
     // Check if already paid
-    const paidPayment = ticket.payments.find((p: typeof ticket.payments[0]) => p.method === PaymentMethod.QRIS && p.status === PaymentStatus.PAID);
+    const paidPayment = ticket.payments.find((p: typeof ticket.payments[0]) => p.method === 'QRIS' && p.status === 'PAID');
     if (paidPayment) {
       throw new ConflictException('QRIS payment already completed');
     }
@@ -97,7 +97,7 @@ export class PaymentsService {
     // Find payment by gateway reference
     const payment = await this.prisma.payment.findFirst({
       where: { qrisRef: verification.paymentId },
-      include: { ticket: true },
+      include: { ticket: { include: { payments: true } } },
     });
 
     if (!payment) {
@@ -105,7 +105,7 @@ export class PaymentsService {
       return { success: true, message: 'Payment not found (already processed?)' };
     }
 
-    if (payment.status === PaymentStatus.PAID) {
+    if (payment.status === 'PAID') {
       return { success: true, message: 'Payment already processed' };
     }
 
@@ -115,12 +115,12 @@ export class PaymentsService {
       // Update payment status
       await this.prisma.payment.update({
         where: { id: payment.id },
-        data: { status: PaymentStatus.PAID },
+        data: { status: 'PAID' },
       });
 
       // Check if all payments are paid
       const allPayments = await this.prisma.payment.findMany({ where: { ticketId: ticket.id } });
-      const allPaid = allPayments.every((p: typeof allPayments[0]) => p.status === PaymentStatus.PAID);
+      const allPaid = allPayments.every((p: typeof allPayments[0]) => p.status === 'PAID');
 
       if (allPaid) {
         // Update ticket status to ORDERED
@@ -138,16 +138,16 @@ export class PaymentsService {
       // Mark payment as failed
       await this.prisma.payment.update({
         where: { id: payment.id },
-        data: { status: PaymentStatus.FAILED },
+data: { status: 'FAILED' },
       });
 
       // Check if all QRIS payments failed - cancel ticket
       const qrisPayments = await this.prisma.payment.findMany({
-        where: { ticketId: ticket.id, method: PaymentMethod.QRIS },
+        where: { ticketId: ticket.id, method: 'QRIS' },
       });
 
-      const allFailed = qrisPayments.every((p: typeof qrisPayments[0]) => p.status === PaymentStatus.FAILED);
-      if (allFailed && ticket.payments.every((p: { method: string }) => p.method === PaymentMethod.QRIS)) {
+      const allFailed = qrisPayments.every((p: typeof qrisPayments[0]) => p.status === 'FAILED');
+      if (allFailed && ticket.payments.every((p: { method: string }) => p.method === 'QRIS')) {
         // All payments are QRIS and all failed - cancel ticket and release stock
         await this.ticketsService.cancelTicket(outletId, ticket.id, payment.ticketId, {
           managerPin: '000000', // System cancellation
@@ -205,24 +205,24 @@ export class PaymentsService {
       throw new NotFoundException('Ticket not found');
     }
 
-    const qrisPayment = ticket.payments.find((p: typeof ticket.payments[0]) => p.method === PaymentMethod.QRIS);
+    const qrisPayment = ticket.payments.find((p: typeof ticket.payments[0]) => p.method === 'QRIS');
     if (!qrisPayment) {
       throw new BadRequestException('No QRIS payment for this ticket');
     }
 
-    if (qrisPayment.status === PaymentStatus.PAID) {
+    if (qrisPayment.status === 'PAID') {
       throw new ConflictException('Cannot cancel paid QRIS payment');
     }
 
     // Mark as failed
     await this.prisma.payment.update({
       where: { id: qrisPayment.id },
-      data: { status: PaymentStatus.FAILED },
+      data: { status: 'FAILED' },
     });
 
     // If all payments failed, cancel ticket
     const allPayments = await this.prisma.payment.findMany({ where: { ticketId } });
-    const allFailed = allPayments.every((p: typeof allPayments[0]) => p.status === PaymentStatus.FAILED || p.status === PaymentStatus.REFUNDED);
+    const allFailed = allPayments.every((p: typeof allPayments[0]) => p.status === 'FAILED' || p.status === 'REFUNDED');
 
     if (allFailed) {
       await this.ticketsService.cancelTicket(outletId, ticketId, userId, {

@@ -127,7 +127,7 @@ export class IngredientsService {
       throw new ConflictException('Insufficient stock');
     }
 
-    return this.prisma.$transaction(async (tx: typeof this.prisma) => {
+    return this.prisma.$transaction(async (tx: import('@prisma/client').Prisma.TransactionClient) => {
       const updated = await tx.ingredient.update({
         where: { id },
         data: { currentQty: newQty },

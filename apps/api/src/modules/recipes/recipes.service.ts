@@ -58,7 +58,7 @@ export class RecipesService {
       }
     }
 
-    return this.prisma.$transaction(async (tx: typeof this.prisma) => {
+    return this.prisma.$transaction(async (tx: import("@prisma/client").Prisma.TransactionClient) => {
       // Delete existing recipe lines
       await tx.recipeLine.deleteMany({ where: { menuId } });
 

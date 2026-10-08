@@ -52,7 +52,7 @@ export class AuthService {
     const activeShift = await this.prisma.shift.findFirst({
       where: {
         outletId,
-        status: ShiftStatus.OPEN,
+        status: 'OPEN',
       },
       orderBy: { openedAt: 'desc' },
     });

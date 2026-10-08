@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MenuAvailability } from '@order-q/shared';
+import { Prisma, MenuAvailability as PrismaMenuAvailability } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 
 interface CreateMenuDto {
@@ -117,7 +118,7 @@ export class MenusService {
     categoryId: string;
     stationId: string;
     avgMakeSeconds: number;
-    availability: MenuAvailability;
+    availability: string;
     isActive: boolean;
     displayOrder: number;
     category?: { name: string } | null;
@@ -128,7 +129,7 @@ export class MenusService {
     }>;
   }): MenuWithPortion {
     let maxPortion: number | null = null;
-    let availability: MenuAvailability = menu.availability;
+    let availability: MenuAvailability = menu.availability as MenuAvailability;
 
     if (menu.recipeLines && menu.recipeLines.length > 0) {
       const portions = menu.recipeLines.map((rl) => {
@@ -221,13 +222,13 @@ export class MenusService {
   async toggleAvailability(outletId: string, id: string) {
     const menu = await this.findById(outletId, id);
 
-    const newAvailability = menu.availability === MenuAvailability.UNAVAILABLE
+    const newAvailability = (menu.availability as MenuAvailability) === MenuAvailability.UNAVAILABLE
       ? MenuAvailability.AVAILABLE
       : MenuAvailability.UNAVAILABLE;
 
     await this.prisma.menu.update({
       where: { id },
-      data: { availability: newAvailability },
+      data: { availability: newAvailability as unknown as PrismaMenuAvailability },
     });
 
     return { availability: newAvailability };
@@ -265,10 +266,10 @@ export class MenusService {
         }
       }
 
-      if (menu.availability !== availability) {
+      if ((menu.availability as MenuAvailability) !== availability) {
         return this.prisma.menu.update({
           where: { id: menu.id },
-          data: { availability },
+          data: { availability: availability as unknown as PrismaMenuAvailability },
         });
       }
       return null;

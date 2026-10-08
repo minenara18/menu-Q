@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
 import { MenusService } from '../menus/menus.service';
 import { ShiftsService } from '../shifts/shifts.service';
+import { Prisma, OrderType as PrismaOrderType, PaymentMethod as PrismaPaymentMethod } from '@prisma/client';
 import { PaymentMethod, PaymentStatus, TicketStatus, SubTicketStatus, OrderType } from '@order-q/shared';
 import { WebsocketGateway } from '../../websocket/websocket.gateway';
 
@@ -140,7 +141,7 @@ export class OrdersService {
     const eta = await this.calculateETA(outletId, dto.items, menus);
 
     // Create ticket, subtickets, order items, payments, and reserve stock in transaction
-    const result = await this.prisma.$transaction(async (tx: typeof this.prisma) => {
+    const result = await this.prisma.$transaction(async (tx: import("@prisma/client").Prisma.TransactionClient) => {
       // Create ticket
       const ticket = await tx.ticket.create({
         data: {
@@ -149,9 +150,9 @@ export class OrdersService {
           dailyNo,
           ticketNumber,
           customerName: dto.customerName,
-          orderType: dto.orderType,
+          orderType: dto.orderType as unknown as PrismaOrderType,
           tableNumber: dto.tableNumber,
-          status: TicketStatus.ORDERED,
+          status: 'ORDERED',
           etaMin: eta.min,
           etaMax: eta.max,
           subtotal,
@@ -179,7 +180,7 @@ export class OrdersService {
           data: {
             ticketId: ticket.id,
             stationId,
-            status: SubTicketStatus.ORDERED,
+            status: 'ORDERED',
             priorityScore: Date.now(), // FIFO by creation time
           },
         });
@@ -198,14 +199,14 @@ export class OrdersService {
         }
       }
 
-      // Create payments
+// Create payments
       for (const payment of dto.payments) {
         await tx.payment.create({
           data: {
             ticketId: ticket.id,
-            method: payment.method,
+            method: payment.method as unknown as PrismaPaymentMethod,
             amount: payment.amount,
-            status: payment.method === PaymentMethod.QRIS ? PaymentStatus.PENDING : PaymentStatus.PAID,
+            status: String(payment.method) === 'QRIS' ? 'PENDING' : 'PAID',
             splitGroupId: payment.splitGroupId,
             qrisRef: payment.method === PaymentMethod.QRIS ? dto.idempotencyKey : null,
           },
@@ -253,7 +254,7 @@ export class OrdersService {
       by: ['stationId'],
       where: {
         ticket: { outletId, shift: { status: 'OPEN' } },
-        status: { in: [SubTicketStatus.ORDERED, SubTicketStatus.IN_PROGRESS] },
+        status: { in: ['ORDERED', 'IN_PROGRESS'] },
       },
       _sum: { priorityScore: true },
       _count: true,

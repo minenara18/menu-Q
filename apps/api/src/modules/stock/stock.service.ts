@@ -95,7 +95,7 @@ export class StockService {
     // Sort by ingredientId to ensure consistent lock order
     allRecipeLines.sort((a, b) => a.ingredientId.localeCompare(b.ingredientId));
 
-    return this.prisma.$transaction(async (tx: typeof this.prisma) => {
+    return this.prisma.$transaction(async (tx: import("@prisma/client").Prisma.TransactionClient) => {
       // Lock ingredients in order
       for (const rl of allRecipeLines) {
         const ingredient = await tx.ingredient.findUnique({
@@ -122,7 +122,7 @@ export class StockService {
             outletId,
             ingredientId: rl.ingredientId,
             qtyDelta: -rl.qty,
-            reason: StockMoveReason.SALE,
+            reason: 'SALE',
             refId: ticketId,
             refType: 'ticket',
             createdBy: userId,
@@ -154,7 +154,7 @@ export class StockService {
     // Sort by ingredientId for consistent lock order
     allRecipeLines.sort((a, b) => a.ingredientId.localeCompare(b.ingredientId));
 
-    return this.prisma.$transaction(async (tx: typeof this.prisma) => {
+    return this.prisma.$transaction(async (tx: import("@prisma/client").Prisma.TransactionClient) => {
       for (const rl of allRecipeLines) {
         await tx.ingredient.update({
           where: { id: rl.ingredientId },
@@ -166,7 +166,7 @@ export class StockService {
             outletId,
             ingredientId: rl.ingredientId,
             qtyDelta: rl.qty,
-            reason: StockMoveReason.REFUND,
+            reason: 'REFUND',
             refId: ticketId,
             refType: 'ticket',
             createdBy: userId,

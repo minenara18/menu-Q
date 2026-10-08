@@ -21,7 +21,7 @@ export class ShiftsService {
 
   async findCurrent(outletId: string) {
     return this.prisma.shift.findFirst({
-      where: { outletId, status: ShiftStatus.OPEN },
+      where: { outletId, status: 'OPEN' },
       orderBy: { openedAt: 'desc' },
       include: {
         openedByUser: { select: { id: true, name: true } },
@@ -45,6 +45,7 @@ export class ShiftsService {
             orderItems: { include: { menu: true } },
           },
         },
+        _count: { select: { tickets: true } },
       },
     });
 
@@ -58,7 +59,7 @@ export class ShiftsService {
   async open(outletId: string, userId: string, dto: OpenShiftDto) {
     // Check if there's already an open shift
     const existingShift = await this.prisma.shift.findFirst({
-      where: { outletId, status: ShiftStatus.OPEN },
+      where: { outletId, status: 'OPEN' },
     });
 
     if (existingShift) {
@@ -70,7 +71,7 @@ export class ShiftsService {
         outletId,
         openedBy: userId,
         openingCash: dto.openingCash,
-        status: ShiftStatus.OPEN,
+        status: 'OPEN',
       },
       include: {
         openedByUser: { select: { id: true, name: true } },
@@ -136,7 +137,7 @@ export class ShiftsService {
   async close(outletId: string, shiftId: string, userId: string, dto: CloseShiftDto, managerPinHash?: string) {
     const shift = await this.findById(outletId, shiftId);
 
-    if (shift.status === ShiftStatus.CLOSED) {
+    if ((shift.status as ShiftStatus) === ShiftStatus.CLOSED) {
       throw new BadRequestException('Shift is already closed');
     }
 
@@ -198,7 +199,7 @@ export class ShiftsService {
     const closedShift = await this.prisma.shift.update({
       where: { id: shiftId },
       data: {
-        status: ShiftStatus.CLOSED,
+        status: 'CLOSED',
         closedAt: new Date(),
         closedBy: userId,
         expectedCash,

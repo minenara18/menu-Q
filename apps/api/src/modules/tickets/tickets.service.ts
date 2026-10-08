@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { Prisma, TicketStatus as PrismaTicketStatus, SubTicketStatus as PrismaSubTicketStatus } from '@prisma/client';
 import { TicketStatus, SubTicketStatus } from '@order-q/shared';
 import { WebsocketGateway } from '../../websocket/websocket.gateway';
 import { StockService } from '../stock/stock.service';
@@ -117,7 +118,7 @@ export class TicketsService {
     const updated = await this.prisma.subTicket.update({
       where: { id: subticketId },
       data: {
-        status: dto.status,
+        status: dto.status as unknown as PrismaSubTicketStatus,
         startedAt: dto.status === SubTicketStatus.IN_PROGRESS && !subticket.startedAt ? new Date() : subticket.startedAt,
         readyAt: dto.status === SubTicketStatus.READY ? new Date() : subticket.readyAt,
       },
@@ -165,7 +166,7 @@ export class TicketsService {
 
     const updated = await this.prisma.ticket.update({
       where: { id: ticketId },
-      data: { status: dto.status },
+      data: { status: dto.status as unknown as PrismaTicketStatus },
       include: { subtickets: { include: { station: true } } },
     });
 
@@ -186,7 +187,7 @@ export class TicketsService {
     const policy = outlet?.partialReadyPolicy || 'WAIT_ALL';
 
     if (policy === 'WAIT_ALL') {
-      const notReady = ticket.subtickets.filter((st: typeof ticket.subtickets[0]) => st.status !== SubTicketStatus.READY);
+      const notReady = ticket.subtickets.filter((st: typeof ticket.subtickets[0]) => st.status !== 'READY');
       if (notReady.length > 0) {
         throw new BadRequestException('Not all subtickets are ready');
       }
@@ -198,11 +199,11 @@ export class TicketsService {
   async cancelTicket(outletId: string, ticketId: string, userId: string, dto: CancelTicketDto) {
     const ticket = await this.findById(outletId, ticketId);
 
-    if (ticket.status === TicketStatus.CANCELLED) {
+    if ((ticket.status as TicketStatus) === TicketStatus.CANCELLED) {
       throw new BadRequestException('Ticket already cancelled');
     }
 
-    if (ticket.status === TicketStatus.COMPLETED) {
+    if ((ticket.status as TicketStatus) === TicketStatus.COMPLETED) {
       throw new BadRequestException('Cannot cancel completed ticket');
     }
 
@@ -217,7 +218,7 @@ export class TicketsService {
     }
 
     // Release stock if ticket was ordered
-    if (ticket.status === TicketStatus.ORDERED || ticket.status === TicketStatus.IN_PROGRESS) {
+    if ((ticket.status as TicketStatus) === TicketStatus.ORDERED || (ticket.status as TicketStatus) === TicketStatus.IN_PROGRESS) {
       const items = ticket.orderItems.map((oi: typeof ticket.orderItems[0]) => ({ menuId: oi.menuId, qty: oi.qty }));
       await this.stockService.releaseStock(outletId, items, ticketId, userId);
     }
@@ -230,13 +231,13 @@ export class TicketsService {
 
     // Cancel all subtickets
     await this.prisma.subTicket.updateMany({
-      where: { ticketId, status: { not: SubTicketStatus.CANCELLED } },
-      data: { status: SubTicketStatus.CANCELLED },
+      where: { ticketId, status: { not: 'CANCELLED' } },
+      data: { status: 'CANCELLED' },
     });
 
     const updated = await this.prisma.ticket.update({
       where: { id: ticketId },
-      data: { status: TicketStatus.CANCELLED },
+      data: { status: 'CANCELLED' },
       include: { subtickets: true, payments: true },
     });
 
@@ -260,7 +261,7 @@ export class TicketsService {
     this.websocketGateway.emitTicketUpdated(outletId, {
       ticketId: updated.id,
       status: updated.status,
-      updatedFields: { status: TicketStatus.CANCELLED },
+      updatedFields: { status: 'CANCELLED' },
     });
 
     return updated;
@@ -274,25 +275,25 @@ export class TicketsService {
 
     if (!ticket) return;
 
-    let newStatus = ticket.status;
+    let newStatus: string = ticket.status;
 
     // Determine aggregate status from subtickets
     const statuses = ticket.subtickets.map((st: typeof ticket.subtickets[0]) => st.status);
 
-    if (statuses.every((s: typeof statuses[0]) => s === SubTicketStatus.READY)) {
-      newStatus = TicketStatus.READY;
-    } else if (statuses.some((s: typeof statuses[0]) => s === SubTicketStatus.IN_PROGRESS)) {
-      newStatus = TicketStatus.IN_PROGRESS;
-    } else if (statuses.every((s: typeof statuses[0]) => s === SubTicketStatus.CANCELLED)) {
-      newStatus = TicketStatus.CANCELLED;
-    } else if (statuses.some((s: typeof statuses[0]) => s === SubTicketStatus.ORDERED)) {
-      newStatus = TicketStatus.ORDERED;
+    if (statuses.every((s: typeof statuses[0]) => s === 'READY')) {
+      newStatus = 'READY';
+    } else if (statuses.some((s: typeof statuses[0]) => s === 'IN_PROGRESS')) {
+      newStatus = 'IN_PROGRESS';
+    } else if (statuses.every((s: typeof statuses[0]) => s === 'CANCELLED')) {
+      newStatus = 'CANCELLED';
+    } else if (statuses.some((s: typeof statuses[0]) => s === 'ORDERED')) {
+      newStatus = 'ORDERED';
     }
 
     if (newStatus !== ticket.status) {
       await this.prisma.ticket.update({
         where: { id: ticketId },
-        data: { status: newStatus },
+        data: { status: newStatus as unknown as PrismaTicketStatus },
       });
     }
   }
@@ -310,15 +311,15 @@ export class TicketsService {
 
     let isReady = false;
     if (policy === 'CALL_PER_STATION') {
-      isReady = ticket.subtickets.some((st: typeof ticket.subtickets[0]) => st.status === SubTicketStatus.READY);
+      isReady = ticket.subtickets.some((st: typeof ticket.subtickets[0]) => st.status === 'READY');
     } else {
-      isReady = ticket.subtickets.every((st: typeof ticket.subtickets[0]) => st.status === SubTicketStatus.READY);
+      isReady = ticket.subtickets.every((st: typeof ticket.subtickets[0]) => st.status === 'READY');
     }
 
-    if (isReady && ticket.status !== TicketStatus.READY && ticket.status !== TicketStatus.COMPLETED) {
+    if (isReady && (ticket.status as TicketStatus) !== TicketStatus.READY && (ticket.status as TicketStatus) !== TicketStatus.COMPLETED) {
       await this.prisma.ticket.update({
         where: { id: ticketId },
-        data: { status: TicketStatus.READY },
+        data: { status: 'READY' },
       });
 
       this.websocketGateway.emitTicketReady(outletId, {

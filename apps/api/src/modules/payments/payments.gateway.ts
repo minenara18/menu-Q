@@ -33,18 +33,18 @@ export class PaymentsGateway implements OnModuleInit, OnModuleDestroy {
 
       const expiredPayments = await this.prisma.payment.findMany({
         where: {
-          method: PaymentMethod.QRIS,
-          status: PaymentStatus.PENDING,
+          method: 'QRIS',
+          status: 'PENDING',
           createdAt: { lt: fiveMinutesAgo },
         },
-        include: { ticket: true },
+        include: { ticket: { include: { orderItems: true } } },
       });
 
       for (const payment of expiredPayments) {
         // Mark as failed
         await this.prisma.payment.update({
           where: { id: payment.id },
-          data: { status: PaymentStatus.FAILED },
+          data: { status: 'FAILED' },
         });
 
         // Check if all payments for this ticket are failed
@@ -53,7 +53,7 @@ export class PaymentsGateway implements OnModuleInit, OnModuleDestroy {
         });
 
         const allFailed = allPayments.every(
-          (p: typeof allPayments[0]) => p.status === PaymentStatus.FAILED || p.status === PaymentStatus.REFUNDED,
+          (p: typeof allPayments[0]) => p.status === 'FAILED' || p.status === 'REFUNDED',
         );
 
         if (allFailed) {

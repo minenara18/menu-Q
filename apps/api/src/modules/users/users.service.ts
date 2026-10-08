@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { UserRole } from '@order-q/shared';
+import { Prisma, UserRole as PrismaUserRole } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 
 interface CreateUserDto {
@@ -77,7 +78,7 @@ export class UsersService {
         outletId,
         name: dto.name,
         pinHash,
-        role: dto.role,
+        role: dto.role as unknown as PrismaUserRole,
       },
       select: {
         id: true,
@@ -117,11 +118,11 @@ export class UsersService {
 
     // Prevent deleting the last owner
     const ownerCount = await this.prisma.user.count({
-      where: { outletId, role: UserRole.OWNER, isActive: true },
+      where: { outletId, role: 'OWNER', isActive: true },
     });
 
     const user = await this.prisma.user.findUnique({ where: { id } });
-    if (user?.role === UserRole.OWNER && ownerCount <= 1) {
+    if (user?.role === 'OWNER' && ownerCount <= 1) {
       throw new ConflictException('Cannot delete the last owner');
     }
 
