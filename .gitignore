@@ -1,0 +1,22 @@
+cat > .gitignore << 'EOF'
+node_modules/
+.pnp.*
+dist/
+build/
+.expo/
+.expo-shared/
+.turbo/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+android/build/
+ios/Pods/
+.DS_Store
+*.log
+npm-debug.log*
+.idea/
+.vscode/*
+!.vscode/extensions.json
+EOF
