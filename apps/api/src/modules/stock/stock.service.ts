@@ -3,7 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StockMoveReason } from '@order-q/shared';
 import { MenusService } from '../menus/menus.service';
 
-interface StockCheckResult {
+export interface StockCheckResult {
   canFulfill: boolean;
   insufficientItems: Array<{
     ingredientId: string;
@@ -95,7 +95,7 @@ export class StockService {
     // Sort by ingredientId to ensure consistent lock order
     allRecipeLines.sort((a, b) => a.ingredientId.localeCompare(b.ingredientId));
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx: typeof this.prisma) => {
       // Lock ingredients in order
       for (const rl of allRecipeLines) {
         const ingredient = await tx.ingredient.findUnique({
@@ -154,7 +154,7 @@ export class StockService {
     // Sort by ingredientId for consistent lock order
     allRecipeLines.sort((a, b) => a.ingredientId.localeCompare(b.ingredientId));
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx: typeof this.prisma) => {
       for (const rl of allRecipeLines) {
         await tx.ingredient.update({
           where: { id: rl.ingredientId },

@@ -33,7 +33,7 @@ interface CheckoutDto {
   idempotencyKey: string;
 }
 
-interface CheckoutResult {
+export interface CheckoutResult {
   ticket: any;
   receipt: any;
 }
@@ -43,6 +43,7 @@ export class OrdersService {
   constructor(
     private prisma: PrismaService,
     private stockService: StockService,
+    private menusService: MenusService,
     private shiftsService: ShiftsService,
     private websocketGateway: WebsocketGateway,
   ) {}
@@ -99,7 +100,7 @@ export class OrdersService {
     const orderItemsData: any[] = [];
 
     for (const item of dto.items) {
-      const menu = menus.find((m) => m.id === item.menuId)!;
+      const menu = menus.find((m: typeof menus[0]) => m.id === item.menuId)!;
       const itemSubtotal = menu.price * item.qty;
       subtotal += itemSubtotal;
 
@@ -139,7 +140,7 @@ export class OrdersService {
     const eta = await this.calculateETA(outletId, dto.items, menus);
 
     // Create ticket, subtickets, order items, payments, and reserve stock in transaction
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx: typeof this.prisma) => {
       // Create ticket
       const ticket = await tx.ticket.create({
         data: {
@@ -164,7 +165,7 @@ export class OrdersService {
       // Group items by station for subtickets
       const itemsByStation = new Map<string, typeof orderItemsData>();
       for (const itemData of orderItemsData) {
-        const menu = menus.find((m) => m.id === itemData.menuId)!;
+        const menu = menus.find((m: typeof menus[0]) => m.id === itemData.menuId)!;
         const stationId = menu.stationId;
         if (!itemsByStation.has(stationId)) {
           itemsByStation.set(stationId, []);
@@ -246,7 +247,7 @@ export class OrdersService {
     return (lastTicket?.dailyNo || 0) + 1;
   }
 
-  private async calculateETA(outletId: string, items: CartItem[], menus: any[]): Promise<{ min: number; max: number }> {
+  private async calculateETA(outletId: string, items: CartItem[], menus: Array<{ id: string; stationId: string; avgMakeSeconds: number }>): Promise<{ min: number; max: number }> {
     // Get current queue load per station
     const stationLoads = await this.prisma.subTicket.groupBy({
       by: ['stationId'],
@@ -264,20 +265,20 @@ export class OrdersService {
       select: { id: true, slaMinutes: true },
     });
 
-    const stationSlaMap = new Map(stations.map((s) => [s.id, s.slaMinutes]));
+    const stationSlaMap = new Map(stations.map((s: typeof stations[0]) => [s.id, s.slaMinutes]));
 
     let maxEta = 0;
 
     for (const item of items) {
-      const menu = menus.find((m) => m.id === item.menuId)!;
+      const menu = menus.find((m: typeof menus[0]) => m.id === item.menuId)!;
       const stationId = menu.stationId;
-      const slaMinutes = stationSlaMap.get(stationId) || 15;
+      const slaMinutes = Number(stationSlaMap.get(stationId) ?? 15);
 
       // Base time: avg make time * qty
       const baseTime = menu.avgMakeSeconds * item.qty / 60; // in minutes
 
       // Add queue load
-      const load = stationLoads.find((l) => l.stationId === stationId);
+      const load = stationLoads.find((l: typeof stationLoads[0]) => l.stationId === stationId);
       const queueTime = load ? load._count * 2 : 0; // Estimate 2 min per queued item
 
       const stationEta = baseTime + queueTime + slaMinutes;
@@ -345,7 +346,7 @@ export class OrdersService {
 
     let subtotal = 0;
     for (const item of items) {
-      const menu = menus.find((m) => m.id === item.menuId)!;
+      const menu = menus.find((m: typeof menus[0]) => m.id === item.menuId)!;
       subtotal += menu.price * item.qty;
     }
 

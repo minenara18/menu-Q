@@ -13,7 +13,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { UserRole } from '@order-q/shared';
+import { UserRole, OrderType, PaymentMethod } from '@order-q/shared';
 import { IdempotencyKeyPipe, IDEMPOTENCY_KEY_HEADER } from '../../common/pipes/idempotency-key.pipe';
 import { z } from 'zod';
 
@@ -24,7 +24,7 @@ const CartItemSchema = z.object({
 });
 
 const CheckoutPaymentSchema = z.object({
-  method: z.enum(['CASH', 'QRIS']),
+  method: z.nativeEnum(PaymentMethod),
   amount: z.number().positive(),
   splitGroupId: z.string().optional(),
 });
@@ -32,7 +32,7 @@ const CheckoutPaymentSchema = z.object({
 const CheckoutSchema = z.object({
   items: z.array(CartItemSchema).min(1),
   customerName: z.string().optional(),
-  orderType: z.enum(['DINE_IN', 'TAKEAWAY']),
+  orderType: z.nativeEnum(OrderType),
   tableNumber: z.string().optional(),
   payments: z.array(CheckoutPaymentSchema).min(1),
   idempotencyKey: z.string().uuid(),
@@ -41,6 +41,8 @@ const CheckoutSchema = z.object({
 const ValidateDraftSchema = z.object({
   items: z.array(CartItemSchema).min(1),
 });
+
+type CheckoutBody = z.infer<typeof CheckoutSchema>;
 
 @ApiTags('orders')
 @Controller('orders')
@@ -59,7 +61,7 @@ export class OrdersController {
     @CurrentUser('shiftId') shiftId: string,
     @CurrentUser('sub') userId: string,
     @Headers(IDEMPOTENCY_KEY_HEADER) idempotencyKey: string,
-    @Body() body: z.infer<typeof CheckoutSchema>,
+    @Body() body: CheckoutBody,
   ) {
     // Use idempotency key from header or body
     const key = idempotencyKey || body.idempotencyKey;

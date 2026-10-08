@@ -38,7 +38,7 @@ export class SettingsService {
     }
 
     const settings = await this.prisma.outletSetting.findMany({ where: { outletId } });
-    const settingsMap = new Map(settings.map((s) => [s.key, s.value]));
+    const settingsMap = new Map(settings.map((s: typeof settings[0]) => [s.key, s.value]));
 
     return {
       outlet: {

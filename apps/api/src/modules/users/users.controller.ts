@@ -70,7 +70,7 @@ export class UsersController {
     @CurrentUser('outletId') outletId: string,
     @Body() body: z.infer<typeof CreateUserSchema>,
   ) {
-    return this.usersService.create(outletId, body);
+    return this.usersService.create(outletId, { ...body, role: body.role as UserRole, outletId });
   }
 
   @Patch(':id')
@@ -81,7 +81,8 @@ export class UsersController {
     @Param('id') id: string,
     @Body() body: z.infer<typeof UpdateUserSchema>,
   ) {
-    return this.usersService.update(outletId, id, body);
+    const updateData = { ...body, role: body.role as UserRole | undefined };
+    return this.usersService.update(outletId, id, updateData);
   }
 
   @Delete(':id')

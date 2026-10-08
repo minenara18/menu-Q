@@ -53,13 +53,13 @@ export class PaymentsGateway implements OnModuleInit, OnModuleDestroy {
         });
 
         const allFailed = allPayments.every(
-          (p) => p.status === PaymentStatus.FAILED || p.status === PaymentStatus.REFUNDED,
+          (p: typeof allPayments[0]) => p.status === PaymentStatus.FAILED || p.status === PaymentStatus.REFUNDED,
         );
 
         if (allFailed) {
           // Cancel ticket and release stock
           const ticket = payment.ticket;
-          const items = ticket.orderItems.map((oi) => ({ menuId: oi.menuId, qty: oi.qty }));
+          const items = ticket.orderItems.map((oi: typeof ticket.orderItems[0]) => ({ menuId: oi.menuId, qty: oi.qty }));
 
           // Release stock
           await this.stockService.releaseStock(

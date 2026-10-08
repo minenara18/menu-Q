@@ -98,7 +98,7 @@ export class StationsService {
 
   async ensureDefaults(outletId: string) {
     const existing = await this.prisma.station.findMany({ where: { outletId } });
-    const existingCodes = new Set(existing.map((s) => s.code));
+    const existingCodes = new Set(existing.map((s: typeof existing[0]) => s.code));
 
     for (const code of Object.values(StationCode)) {
       if (!existingCodes.has(code)) {

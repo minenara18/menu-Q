@@ -9,7 +9,7 @@ interface CreateMenuDto {
   name: string;
   description?: string;
   price: number;
-  imageUrl?: string;
+  imageUrl?: string | null;
   displayOrder?: number;
   avgMakeSeconds?: number;
 }
@@ -20,13 +20,13 @@ interface UpdateMenuDto {
   name?: string;
   description?: string;
   price?: number;
-  imageUrl?: string;
+  imageUrl?: string | null;
   displayOrder?: number;
   isActive?: boolean;
   avgMakeSeconds?: number;
 }
 
-interface MenuWithPortion {
+export interface MenuWithPortion {
   id: string;
   name: string;
   price: number;
@@ -87,7 +87,7 @@ export class MenusService {
       ],
     });
 
-    return menus.map((menu) => this.enrichMenuWithPortion(menu));
+    return menus.map((menu: typeof menus[0]) => this.enrichMenuWithPortion(menu));
   }
 
   async findById(outletId: string, id: string) {
@@ -109,12 +109,29 @@ export class MenusService {
     return this.enrichMenuWithPortion(menu);
   }
 
-  private enrichMenuWithPortion(menu: any): MenuWithPortion {
+  private enrichMenuWithPortion(menu: {
+    id: string;
+    name: string;
+    price: number;
+    imageUrl: string | null;
+    categoryId: string;
+    stationId: string;
+    avgMakeSeconds: number;
+    availability: MenuAvailability;
+    isActive: boolean;
+    displayOrder: number;
+    category?: { name: string } | null;
+    station?: { code: string; color: string } | null;
+    recipeLines?: Array<{
+      ingredient: { currentQty: number; minThreshold: number };
+      qtyPerPortion: number;
+    }>;
+  }): MenuWithPortion {
     let maxPortion: number | null = null;
-    let availability = menu.availability;
+    let availability: MenuAvailability = menu.availability;
 
     if (menu.recipeLines && menu.recipeLines.length > 0) {
-      const portions = menu.recipeLines.map((rl: any) => {
+      const portions = menu.recipeLines.map((rl) => {
         if (rl.ingredient.currentQty <= 0 || rl.qtyPerPortion <= 0) return 0;
         return Math.floor(rl.ingredient.currentQty / rl.qtyPerPortion);
       });
@@ -123,7 +140,7 @@ export class MenusService {
 
       if (maxPortion <= 0) {
         availability = MenuAvailability.UNAVAILABLE;
-      } else if (maxPortion <= (menu.ingredient?.minThreshold || 5)) {
+      } else if (maxPortion <= (menu.recipeLines[0]?.ingredient.minThreshold || 5)) {
         availability = MenuAvailability.LOW_STOCK;
       } else {
         availability = MenuAvailability.AVAILABLE;
@@ -137,9 +154,9 @@ export class MenusService {
       imageUrl: menu.imageUrl,
       categoryId: menu.categoryId,
       stationId: menu.stationId,
-      stationCode: menu.station?.code,
-      stationColor: menu.station?.color,
-      categoryName: menu.category?.name,
+      stationCode: menu.station?.code ?? '',
+      stationColor: menu.station?.color ?? '',
+      categoryName: menu.category?.name ?? '',
       avgMakeSeconds: menu.avgMakeSeconds,
       availability,
       maxPortion,
@@ -230,11 +247,11 @@ export class MenusService {
       },
     });
 
-    const updates = menus.map((menu) => {
+    const updates = menus.map((menu: typeof menus[0]) => {
       let availability = MenuAvailability.AVAILABLE;
 
       if (menu.recipeLines.length > 0) {
-        const portions = menu.recipeLines.map((rl) => {
+        const portions = menu.recipeLines.map((rl: typeof menu.recipeLines[0]) => {
           if (rl.ingredient.currentQty <= 0 || rl.qtyPerPortion <= 0) return 0;
           return Math.floor(rl.ingredient.currentQty / rl.qtyPerPortion);
         });

@@ -20,5 +20,10 @@
       "@order-q/mobile": ["apps/mobile/src"]
     }
   },
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./apps/api" },
+    { "path": "./apps/mobile" }
+  ],
   "exclude": ["node_modules", "dist", "build", ".expo"]
 }

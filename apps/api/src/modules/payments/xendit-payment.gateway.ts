@@ -50,7 +50,7 @@ export class XenditPaymentGateway implements PaymentGateway {
       throw new Error(`Xendit QRIS error: ${JSON.stringify(error)}`);
     }
 
-    const data: XenditQRISResponse = await response.json();
+    const data = (await response.json()) as XenditQRISResponse;
 
     return {
       paymentId: data.id,

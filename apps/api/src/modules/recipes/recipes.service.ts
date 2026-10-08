@@ -58,7 +58,7 @@ export class RecipesService {
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx: typeof this.prisma) => {
       // Delete existing recipe lines
       await tx.recipeLine.deleteMany({ where: { menuId } });
 

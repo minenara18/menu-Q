@@ -109,7 +109,7 @@ export class TicketsService {
       [SubTicketStatus.CANCELLED]: [],
     };
 
-    const allowed = validTransitions[subticket.status]?.includes(dto.status);
+    const allowed = validTransitions[subticket.status as SubTicketStatus]?.includes(dto.status);
     if (!allowed) {
       throw new BadRequestException(`Invalid status transition from ${subticket.status} to ${dto.status}`);
     }
@@ -158,7 +158,7 @@ export class TicketsService {
       [TicketStatus.CANCELLED]: [],
     };
 
-    const allowed = validTransitions[ticket.status]?.includes(dto.status);
+    const allowed = validTransitions[ticket.status as TicketStatus]?.includes(dto.status);
     if (!allowed) {
       throw new BadRequestException(`Invalid status transition from ${ticket.status} to ${dto.status}`);
     }
@@ -186,7 +186,7 @@ export class TicketsService {
     const policy = outlet?.partialReadyPolicy || 'WAIT_ALL';
 
     if (policy === 'WAIT_ALL') {
-      const notReady = ticket.subtickets.filter((st) => st.status !== SubTicketStatus.READY);
+      const notReady = ticket.subtickets.filter((st: typeof ticket.subtickets[0]) => st.status !== SubTicketStatus.READY);
       if (notReady.length > 0) {
         throw new BadRequestException('Not all subtickets are ready');
       }
@@ -207,7 +207,7 @@ export class TicketsService {
     }
 
     // Verify manager PIN if ticket is paid
-    const hasPaidPayments = ticket.payments.some((p) => p.status === 'PAID');
+    const hasPaidPayments = ticket.payments.some((p: typeof ticket.payments[0]) => p.status === 'PAID');
     if (hasPaidPayments) {
       // In real implementation, verify against manager's PIN
       // For now, just check if PIN was provided
@@ -218,7 +218,7 @@ export class TicketsService {
 
     // Release stock if ticket was ordered
     if (ticket.status === TicketStatus.ORDERED || ticket.status === TicketStatus.IN_PROGRESS) {
-      const items = ticket.orderItems.map((oi) => ({ menuId: oi.menuId, qty: oi.qty }));
+      const items = ticket.orderItems.map((oi: typeof ticket.orderItems[0]) => ({ menuId: oi.menuId, qty: oi.qty }));
       await this.stockService.releaseStock(outletId, items, ticketId, userId);
     }
 
@@ -241,7 +241,7 @@ export class TicketsService {
     });
 
     // Recalculate menu availability
-    await this.prisma.menu.findMany({ where: { outletId } }).then((menus) => {
+    await this.prisma.menu.findMany({ where: { outletId } }).then((menus: any[]) => {
       // Trigger recalculation via service
     });
 
@@ -277,15 +277,15 @@ export class TicketsService {
     let newStatus = ticket.status;
 
     // Determine aggregate status from subtickets
-    const statuses = ticket.subtickets.map((st) => st.status);
+    const statuses = ticket.subtickets.map((st: typeof ticket.subtickets[0]) => st.status);
 
-    if (statuses.every((s) => s === SubTicketStatus.READY)) {
+    if (statuses.every((s: typeof statuses[0]) => s === SubTicketStatus.READY)) {
       newStatus = TicketStatus.READY;
-    } else if (statuses.some((s) => s === SubTicketStatus.IN_PROGRESS)) {
+    } else if (statuses.some((s: typeof statuses[0]) => s === SubTicketStatus.IN_PROGRESS)) {
       newStatus = TicketStatus.IN_PROGRESS;
-    } else if (statuses.every((s) => s === SubTicketStatus.CANCELLED)) {
+    } else if (statuses.every((s: typeof statuses[0]) => s === SubTicketStatus.CANCELLED)) {
       newStatus = TicketStatus.CANCELLED;
-    } else if (statuses.some((s) => s === SubTicketStatus.ORDERED)) {
+    } else if (statuses.some((s: typeof statuses[0]) => s === SubTicketStatus.ORDERED)) {
       newStatus = TicketStatus.ORDERED;
     }
 
@@ -310,9 +310,9 @@ export class TicketsService {
 
     let isReady = false;
     if (policy === 'CALL_PER_STATION') {
-      isReady = ticket.subtickets.some((st) => st.status === SubTicketStatus.READY);
+      isReady = ticket.subtickets.some((st: typeof ticket.subtickets[0]) => st.status === SubTicketStatus.READY);
     } else {
-      isReady = ticket.subtickets.every((st) => st.status === SubTicketStatus.READY);
+      isReady = ticket.subtickets.every((st: typeof ticket.subtickets[0]) => st.status === SubTicketStatus.READY);
     }
 
     if (isReady && ticket.status !== TicketStatus.READY && ticket.status !== TicketStatus.COMPLETED) {

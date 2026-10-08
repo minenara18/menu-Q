@@ -11,7 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole, ShiftStatus } from '@order-q/shared';
 import { v4 as uuidv4 } from 'uuid';
 
-interface TokenPayload {
+export interface TokenPayload {
   sub: string;
   outletId: string;
   name: string;

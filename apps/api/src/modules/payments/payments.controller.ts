@@ -49,7 +49,7 @@ export class PaymentsController {
       throw new Error('Ticket not found');
     }
 
-    const qrisPayment = ticket.payments.find((p) => p.method === 'QRIS' && p.status === 'PENDING');
+    const qrisPayment = ticket.payments.find((p: { method: string; status: string }) => p.method === 'QRIS' && p.status === 'PENDING');
     if (!qrisPayment) {
       throw new Error('No pending QRIS payment');
     }

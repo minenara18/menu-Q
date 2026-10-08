@@ -47,7 +47,7 @@ export class IngredientsService {
         },
       },
     });
-    return all.filter((i) => i.currentQty <= i.minThreshold);
+    return all.filter((i: typeof all[0]) => i.currentQty <= i.minThreshold);
   }
 
   async findById(outletId: string, id: string) {
@@ -127,7 +127,7 @@ export class IngredientsService {
       throw new ConflictException('Insufficient stock');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx: typeof this.prisma) => {
       const updated = await tx.ingredient.update({
         where: { id },
         data: { currentQty: newQty },

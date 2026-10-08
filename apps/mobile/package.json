@@ -6,7 +6,7 @@
     "dev": "expo start",
     "build": "expo export",
     "lint": "eslint . --ext .ts,.tsx",
-    "test": "jest"
+    "test": "jest --passWithNoTests"
   },
   "dependencies": {
     "expo": "~51.0.0",

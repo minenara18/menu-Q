@@ -28,7 +28,7 @@ interface AuthenticatedSocket extends Socket {
 })
 export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private readonly logger = new Logger(WebsocketGateway.name);
   private userSockets = new Map<string, Set<string>>(); // userId -> socketIds
@@ -79,8 +79,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       }
 
       this.logger.log(`Client ${client.id} connected: user=${payload.sub}, outlet=${payload.outletId}, role=${payload.role}`);
-    } catch (error) {
-      this.logger.warn(`Client ${client.id} auth failed: ${error.message}`);
+    } catch (error: unknown) {
+      this.logger.warn(`Client ${client.id} auth failed: ${error instanceof Error ? error.message : String(error)}`);
       client.disconnect();
     }
   }
@@ -185,6 +185,6 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (outletId) {
       return this.outletRooms.get(outletId)?.size || 0;
     }
-    return this.server.sockets.size;
+    return this.server.engine?.clientsCount || 0;
   }
 }
