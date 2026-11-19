@@ -1,41 +1,44 @@
+// Enum values MUST match the Prisma/PostgreSQL enum values (uppercase).
+// Do not lowercase these without migrating the database enums too.
+
 export enum UserRole {
-  CASHIER = 'cashier',
-  MAKER = 'maker',
-  OWNER = 'owner',
+  CASHIER = 'CASHIER',
+  MAKER = 'MAKER',
+  OWNER = 'OWNER',
 }
 
 export enum TicketStatus {
-  DRAFT = 'draft',
-  PENDING_PAYMENT = 'pending_payment',
-  ORDERED = 'ordered',
-  IN_PROGRESS = 'in_progress',
-  READY = 'ready',
-  COMPLETED = 'completed',
-  CANCELLED = 'cancelled',
+  DRAFT = 'DRAFT',
+  PENDING_PAYMENT = 'PENDING_PAYMENT',
+  ORDERED = 'ORDERED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  READY = 'READY',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
 }
 
 export enum SubTicketStatus {
-  ORDERED = 'ordered',
-  IN_PROGRESS = 'in_progress',
-  READY = 'ready',
-  CANCELLED = 'cancelled',
+  ORDERED = 'ORDERED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  READY = 'READY',
+  CANCELLED = 'CANCELLED',
 }
 
 export enum OrderType {
-  DINE_IN = 'dine_in',
-  TAKEAWAY = 'takeaway',
+  DINE_IN = 'DINE_IN',
+  TAKEAWAY = 'TAKEAWAY',
 }
 
 export enum PaymentMethod {
-  CASH = 'cash',
-  QRIS = 'qris',
+  CASH = 'CASH',
+  QRIS = 'QRIS',
 }
 
 export enum PaymentStatus {
-  PENDING = 'pending',
-  PAID = 'paid',
-  FAILED = 'failed',
-  REFUNDED = 'refunded',
+  PENDING = 'PENDING',
+  PAID = 'PAID',
+  FAILED = 'FAILED',
+  REFUNDED = 'REFUNDED',
 }
 
 export enum StationCode {
@@ -45,21 +48,21 @@ export enum StationCode {
 }
 
 export enum StockMoveReason {
-  SALE = 'sale',
-  REFUND = 'refund',
-  OPNAME = 'opname',
-  RECEIVE = 'receive',
-  ADJUSTMENT = 'adjustment',
-  WASTE = 'waste',
+  SALE = 'SALE',
+  REFUND = 'REFUND',
+  OPNAME = 'OPNAME',
+  RECEIVE = 'RECEIVE',
+  ADJUSTMENT = 'ADJUSTMENT',
+  WASTE = 'WASTE',
 }
 
 export enum ShiftStatus {
-  OPEN = 'open',
-  CLOSED = 'closed',
+  OPEN = 'OPEN',
+  CLOSED = 'CLOSED',
 }
 
 export enum MenuAvailability {
-  AVAILABLE = 'available',
-  LOW_STOCK = 'low_stock',
-  UNAVAILABLE = 'unavailable',
+  AVAILABLE = 'AVAILABLE',
+  LOW_STOCK = 'LOW_STOCK',
+  UNAVAILABLE = 'UNAVAILABLE',
 }

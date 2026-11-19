@@ -98,7 +98,7 @@ export class TicketsService {
     }
 
     // Check permissions: makers can only update their station
-    if (userRole === 'maker') {
+    if (userRole === 'MAKER') {
       // In real implementation, check if user is assigned to this station
       // For now, allow all makers to update any subticket
     }

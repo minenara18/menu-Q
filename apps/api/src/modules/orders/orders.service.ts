@@ -50,6 +50,11 @@ export class OrdersService {
   ) {}
 
   async checkout(outletId: string, shiftId: string, userId: string, dto: CheckoutDto): Promise<CheckoutResult> {
+    if (!shiftId) {
+      // JWT carries shiftId at login time; an open shift created afterwards requires a re-login.
+      throw new BadRequestException('No active shift in token. Open a shift and sign in again.');
+    }
+
     // Check idempotency
     const existingPayment = await this.prisma.payment.findFirst({
       where: { qrisRef: dto.idempotencyKey },

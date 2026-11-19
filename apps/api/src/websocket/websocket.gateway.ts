@@ -69,7 +69,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.outletRooms.get(payload.outletId)!.add(client.id);
 
       // If maker, join station room
-      if (payload.role === 'maker') {
+      if (payload.role === 'MAKER') {
         // In real implementation, get user's assigned station
         // For now, join all stations
         const stations = ['BAR', 'KITCHEN', 'PASTRY'];
