@@ -1,8 +1,20 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+
+const logger = new Logger('Bootstrap');
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled Rejection', reason as Error);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception', error.stack);
+  process.exit(1);
+});
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -48,10 +60,10 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, document);
 
-  const port = configService.get('app.port');
-  await app.listen(port);
-  console.log(`🚀 Order-Q API running on http://localhost:${port}/${configService.get('app.apiPrefix')}`);
-  console.log(`📚 Swagger docs at http://localhost:${port}/docs`);
+  const port = configService.get<number>('app.port') ?? 3000;
+  // Bind 0.0.0.0 so the API is reachable from LAN/devices (not just localhost).
+  await app.listen(port, '0.0.0.0');
+  logger.log(`Order-Q API running on http://localhost:${port}/${apiPrefix}`);
+  logger.log(`Swagger docs at http://localhost:${port}/docs`);
 }
-
 bootstrap();

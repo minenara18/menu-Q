@@ -18,7 +18,9 @@ export class PaymentsGateway implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     // Check for expired QRIS payments every minute
-    this.interval = setInterval(() => this.checkExpiredPayments(), 60 * 1000);
+    this.interval = setInterval(() => {
+      void this.checkExpiredPayments();
+    }, 60 * 1000);
   }
 
   onModuleDestroy() {
