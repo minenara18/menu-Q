@@ -34,6 +34,11 @@ async function bootstrap() {
       logger.error('FATAL: QRIS is enabled but QRIS_MERCHANT_ID / QRIS_API_KEY / QRIS_WEBHOOK_SECRET are missing. Refusing to boot.');
       process.exit(1);
     }
+    const jwtSecret = configService.get<string>('app.jwt.secret');
+    if (!jwtSecret || jwtSecret === 'change-me-in-production-min-32-chars') {
+      logger.error('FATAL: JWT_SECRET must be set to a strong random value in production (the code default is not acceptable). Refusing to boot.');
+      process.exit(1);
+    }
   }
 
   const apiPrefix = configService.get<string>('app.apiPrefix') ?? 'v1';
