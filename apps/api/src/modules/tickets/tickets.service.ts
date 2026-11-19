@@ -4,6 +4,14 @@ import { Prisma, TicketStatus as PrismaTicketStatus, SubTicketStatus as PrismaSu
 import { TicketStatus, SubTicketStatus } from '@order-q/shared';
 import { WebsocketGateway } from '../../websocket/websocket.gateway';
 import { StockService } from '../stock/stock.service';
+import { MenusService } from '../menus/menus.service';
+import { ManagerPinService } from '../auth/manager-pin.service';
+
+interface ActingUser {
+  id: string;
+  role: string;
+  stationId?: string | null;
+}
 
 interface SubTicketStatusUpdate {
   status: SubTicketStatus;
@@ -24,6 +32,8 @@ export class TicketsService {
     private prisma: PrismaService,
     private websocketGateway: WebsocketGateway,
     private stockService: StockService,
+    private menusService: MenusService,
+    private managerPin: ManagerPinService,
   ) {}
 
   async findAll(outletId: string, query: {
@@ -34,11 +44,23 @@ export class TicketsService {
     dateTo?: Date;
     limit?: number;
     offset?: number;
-  }) {
+  }, user?: ActingUser) {
     const where: any = { outletId };
 
     if (query.status) where.status = query.status;
-    if (query.station) where.subtickets = { some: { station: { code: query.station } } };
+
+    const subticketFilter: any = {};
+    if (query.station) subticketFilter.station = { code: query.station };
+    // Makers only see tickets that contain work for their assigned station
+    if (user?.role === 'MAKER') {
+      if (!user.stationId) {
+        throw new ForbiddenException('Maker is not assigned to a station');
+      }
+      subticketFilter.stationId = user.stationId;
+    }
+    if (Object.keys(subticketFilter).length > 0) {
+      where.subtickets = { some: subticketFilter };
+    }
     if (query.q) {
       where.OR = [
         { ticketNumber: { contains: query.q, mode: 'insensitive' } },
@@ -87,7 +109,7 @@ export class TicketsService {
     return ticket;
   }
 
-  async updateSubTicketStatus(outletId: string, subticketId: string, userId: string, userRole: string, dto: SubTicketStatusUpdate) {
+  async updateSubTicketStatus(outletId: string, subticketId: string, userId: string, userRole: string, dto: SubTicketStatusUpdate, userStationId?: string | null) {
     const subticket = await this.prisma.subTicket.findFirst({
       where: { id: subticketId, ticket: { outletId } },
       include: { ticket: true, station: true },
@@ -97,10 +119,14 @@ export class TicketsService {
       throw new NotFoundException('Sub-ticket not found');
     }
 
-    // Check permissions: makers can only update their station
+    // Makers can only update sub-tickets for their assigned station
     if (userRole === 'MAKER') {
-      // In real implementation, check if user is assigned to this station
-      // For now, allow all makers to update any subticket
+      if (!userStationId) {
+        throw new ForbiddenException('Maker is not assigned to a station');
+      }
+      if (subticket.stationId !== userStationId) {
+        throw new ForbiddenException('Maker hanya boleh mengupdate sub-tiket stasiunnya sendiri');
+      }
     }
 
     const validTransitions: Record<SubTicketStatus, SubTicketStatus[]> = {
@@ -196,7 +222,7 @@ export class TicketsService {
     return this.updateTicketStatus(outletId, ticketId, userId, { status: TicketStatus.COMPLETED });
   }
 
-  async cancelTicket(outletId: string, ticketId: string, userId: string, dto: CancelTicketDto) {
+  async cancelTicket(outletId: string, ticketId: string, userId: string, dto: CancelTicketDto, opts?: { system?: boolean }) {
     const ticket = await this.findById(outletId, ticketId);
 
     if ((ticket.status as TicketStatus) === TicketStatus.CANCELLED) {
@@ -207,20 +233,32 @@ export class TicketsService {
       throw new BadRequestException('Cannot cancel completed ticket');
     }
 
-    // Verify manager PIN if ticket is paid
+    // Verify manager PIN if ticket is paid and this is a user-initiated cancellation
     const hasPaidPayments = ticket.payments.some((p: typeof ticket.payments[0]) => p.status === 'PAID');
-    if (hasPaidPayments) {
-      // In real implementation, verify against manager's PIN
-      // For now, just check if PIN was provided
-      if (!dto.managerPin || dto.managerPin.length !== 6) {
-        throw new ForbiddenException('Manager PIN required for paid ticket cancellation');
-      }
+    if (hasPaidPayments && !opts?.system) {
+      await this.managerPin.verify(outletId, dto.managerPin, {
+        action: 'CANCEL_PAID_TICKET',
+        entity: 'Ticket',
+        entityId: ticketId,
+        actorId: userId,
+      });
     }
 
     // Release stock if ticket was ordered
+    // StockMove.createdBy is an FK to User, so system-initiated refunds attribute to the shift opener
+    const stockActorId = userId === 'system' ? (ticket.shift?.openedBy ?? userId) : userId;
     if ((ticket.status as TicketStatus) === TicketStatus.ORDERED || (ticket.status as TicketStatus) === TicketStatus.IN_PROGRESS) {
       const items = ticket.orderItems.map((oi: typeof ticket.orderItems[0]) => ({ menuId: oi.menuId, qty: oi.qty }));
-      await this.stockService.releaseStock(outletId, items, ticketId, userId);
+      const changes = await this.stockService.releaseStock(outletId, items, ticketId, stockActorId);
+      if (changes.length > 0) {
+        this.websocketGateway.emitStockChanged(outletId, {
+          outletId,
+          reason: 'REFUND',
+          ticketId,
+          changes,
+          at: new Date().toISOString(),
+        });
+      }
     }
 
     // Update payments to refunded
@@ -241,20 +279,18 @@ export class TicketsService {
       include: { subtickets: true, payments: true },
     });
 
-    // Recalculate menu availability
-    await this.prisma.menu.findMany({ where: { outletId } }).then((menus: any[]) => {
-      // Trigger recalculation via service
-    });
+    // Recalculate menu availability now that stock was released
+    await this.menusService.recalculateAvailability(outletId);
 
-    // Audit log
+    // Audit log (system actions have no user actor)
     await this.prisma.auditLog.create({
       data: {
         outletId,
-        actorId: userId,
+        actorId: userId === 'system' ? null : userId,
         action: 'TICKET_CANCEL',
         entity: 'Ticket',
         entityId: ticketId,
-        diff: { previousStatus: ticket.status, reason: dto.reason },
+        diff: { previousStatus: ticket.status, reason: dto.reason, system: userId === 'system' ? true : undefined },
       },
     });
 

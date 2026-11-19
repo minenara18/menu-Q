@@ -20,6 +20,22 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
 
+  const nodeEnv = configService.get<string>('app.nodeEnv') ?? 'development';
+  const qrisEnabled = configService.get<boolean>('app.qris.enabled') === true;
+  if (nodeEnv === 'production') {
+    if (!qrisEnabled) {
+      logger.error('FATAL: QRIS_ENABLED must be true in production (payment collection requires a real QRIS gateway). Refusing to boot.');
+      process.exit(1);
+    }
+    const merchantId = configService.get<string>('app.qris.merchantId');
+    const apiKey = configService.get<string>('app.qris.apiKey');
+    const webhookSecret = configService.get<string>('app.qris.webhookSecret');
+    if (!merchantId || !apiKey || !webhookSecret) {
+      logger.error('FATAL: QRIS is enabled but QRIS_MERCHANT_ID / QRIS_API_KEY / QRIS_WEBHOOK_SECRET are missing. Refusing to boot.');
+      process.exit(1);
+    }
+  }
+
   const apiPrefix = configService.get<string>('app.apiPrefix') ?? 'v1';
   app.setGlobalPrefix(apiPrefix);
   app.enableCors({

@@ -29,6 +29,13 @@ const CheckoutPaymentSchema = z.object({
   splitGroupId: z.string().optional(),
 });
 
+const DiscountSchema = z.object({
+  type: z.enum(['amount', 'percent']),
+  value: z.number().min(0),
+}).refine((d) => (d.type === 'percent' ? d.value <= 100 : true), {
+  message: 'Discount percent must be <= 100',
+});
+
 const CheckoutSchema = z.object({
   items: z.array(CartItemSchema).min(1),
   customerName: z.string().optional(),
@@ -36,6 +43,7 @@ const CheckoutSchema = z.object({
   tableNumber: z.string().optional(),
   payments: z.array(CheckoutPaymentSchema).min(1),
   idempotencyKey: z.string().uuid(),
+  discount: DiscountSchema.optional(),
 });
 
 const ValidateDraftSchema = z.object({

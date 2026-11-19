@@ -1,19 +1,15 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { PaymentStatus, PaymentMethod } from '@order-q/shared';
 import { TicketsService } from '../tickets/tickets.service';
-import { StockService } from '../stock/stock.service';
 
 @Injectable()
 export class PaymentsGateway implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(PaymentsGateway.name);
   private interval: NodeJS.Timeout | null = null;
 
   constructor(
-    private configService: ConfigService,
     private prisma: PrismaService,
     private ticketsService: TicketsService,
-    private stockService: StockService,
   ) {}
 
   onModuleInit() {
@@ -59,45 +55,16 @@ export class PaymentsGateway implements OnModuleInit, OnModuleDestroy {
         );
 
         if (allFailed) {
-          // Cancel ticket and release stock
+          // Cancel ticket and release stock (system-initiated: no manager PIN required)
           const ticket = payment.ticket;
-          const items = ticket.orderItems.map((oi: typeof ticket.orderItems[0]) => ({ menuId: oi.menuId, qty: oi.qty }));
-
-          // Release stock
-          await this.stockService.releaseStock(
-            ticket.outletId,
-            items,
-            ticket.id,
-            'system',
-          );
-
-          // Cancel ticket
-          await this.prisma.ticket.update({
-            where: { id: ticket.id },
-            data: { status: 'CANCELLED' },
-          });
-
-          // Cancel subtickets
-          await this.prisma.subTicket.updateMany({
-            where: { ticketId: ticket.id, status: { not: 'CANCELLED' } },
-            data: { status: 'CANCELLED' },
-          });
-
-          // Audit log
-          await this.prisma.auditLog.create({
-            data: {
-              outletId: ticket.outletId,
-              actorId: 'system',
-              action: 'QRIS_TIMEOUT_CANCEL',
-              entity: 'Ticket',
-              entityId: ticket.id,
-              diff: { reason: 'QRIS payment timeout (5 min)' },
-            },
-          });
+          await this.ticketsService.cancelTicket(ticket.outletId, ticket.id, 'system', {
+            managerPin: '',
+            reason: 'QRIS payment timeout (5 min)',
+          }, { system: true });
         }
       }
     } catch (error) {
-      console.error('Error checking expired payments:', error);
+      this.logger.error('Error checking expired payments', error as Error);
     }
   }
 }

@@ -19,15 +19,23 @@ export class PaymentsService {
     private ticketsService: TicketsService,
     private websocketGateway: WebsocketGateway,
   ) {
-    // Register gateways
+    // Register gateways. The mock gateway is only usable outside production.
     this.gateways.set('mock', new MockPaymentGateway());
-    if (this.configService.get('QRIS_ENABLED') === 'true') {
+    if (this.configService.get('app.qris.enabled') === true || this.configService.get('app.qris.enabled') === 'true') {
       this.gateways.set('xendit', new XenditPaymentGateway(configService));
     }
   }
 
+  private isQrisEnabled(): boolean {
+    const v = this.configService.get('app.qris.enabled');
+    return v === true || v === 'true';
+  }
+
   private getGateway(): PaymentGateway {
-    const gatewayName = this.configService.get('QRIS_ENABLED') === 'true' ? 'xendit' : 'mock';
+    const gatewayName = this.isQrisEnabled() ? 'xendit' : 'mock';
+    if (gatewayName === 'mock' && this.configService.get('app.nodeEnv') === 'production') {
+      throw new BadRequestException('Mock payment gateway is disabled in production');
+    }
     const gateway = this.gateways.get(gatewayName);
     if (!gateway) {
       throw new BadRequestException(`Payment gateway ${gatewayName} not configured`);
@@ -149,10 +157,10 @@ data: { status: 'FAILED' },
       const allFailed = qrisPayments.every((p: typeof qrisPayments[0]) => p.status === 'FAILED');
       if (allFailed && ticket.payments.every((p: { method: string }) => p.method === 'QRIS')) {
         // All payments are QRIS and all failed - cancel ticket and release stock
-        await this.ticketsService.cancelTicket(outletId, ticket.id, payment.ticketId, {
-          managerPin: '000000', // System cancellation
-          reason: 'QRIS payment expired/failed',
-        });
+        await this.ticketsService.cancelTicket(outletId, ticket.id, 'system', {
+           managerPin: '', // System cancellation
+           reason: 'QRIS payment expired/failed',
+         }, { system: true });
       }
 
       return { success: true, message: 'Payment failed/expired' };

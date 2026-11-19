@@ -112,10 +112,12 @@ model User {
   pinHash   String
   role      UserRole
   isActive  Boolean  @default(true)
+  stationId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   outlet    Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+  station   Station? @relation(fields: [stationId], references: [id], onDelete: SetNull)
   shiftsOpened   Shift[] @relation("ShiftOpenedBy")
   shiftsClosed   Shift[] @relation("ShiftClosedBy")
   stockMoves     StockMove[]
@@ -124,6 +126,7 @@ model User {
   @@unique([outletId, name])
   @@index([outletId])
   @@index([role])
+  @@index([stationId])
 }
 
 model Shift {
@@ -183,6 +186,7 @@ model Station {
   outlet      Outlet       @relation(fields: [outletId], references: [id], onDelete: Cascade)
   menus       Menu[]
   subtickets  SubTicket[]
+  staff       User[]
 
   @@unique([outletId, code])
   @@index([outletId, displayOrder])
@@ -353,6 +357,7 @@ model Payment {
   splitGroupId  String?
   qrisRef       String?
   qrisPayload   Json?
+  idempotencyKey String?       @unique
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 

@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { WebsocketGateway } from '../../websocket/websocket.gateway';
+import { MenusService } from '../menus/menus.service';
 import { v4 as uuidv4 } from 'uuid';
 
 interface CreateIngredientDto {
@@ -19,7 +21,11 @@ interface UpdateIngredientDto {
 
 @Injectable()
 export class IngredientsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private websocketGateway: WebsocketGateway,
+    private menusService: MenusService,
+  ) {}
 
   async findAll(outletId: string, lowStockOnly = false) {
     const where: any = { outletId };
@@ -120,18 +126,18 @@ export class IngredientsService {
   }
 
   async adjustStock(outletId: string, id: string, delta: number, userId: string, reason: string, refId?: string, refType?: string) {
-    const ingredient = await this.findById(outletId, id);
+    await this.findById(outletId, id);
 
-    const newQty = ingredient.currentQty + delta;
-    if (newQty < 0) {
-      throw new ConflictException('Insufficient stock');
-    }
-
-    return this.prisma.$transaction(async (tx: import('@prisma/client').Prisma.TransactionClient) => {
-      const updated = await tx.ingredient.update({
-        where: { id },
-        data: { currentQty: newQty },
+    const result = await this.prisma.$transaction(async (tx: import('@prisma/client').Prisma.TransactionClient) => {
+      // Atomic guarded update: decrements only when enough quantity remains
+      const updated = await tx.ingredient.updateMany({
+        where: delta < 0 ? { id, currentQty: { gte: -delta } } : { id },
+        data: { currentQty: { increment: delta } },
       });
+
+      if (updated.count !== 1) {
+        throw new ConflictException('Insufficient stock');
+      }
 
       await tx.stockMove.create({
         data: {
@@ -145,7 +151,18 @@ export class IngredientsService {
         },
       });
 
-      return updated;
+      return tx.ingredient.findUniqueOrThrow({ where: { id } });
     });
+
+    await this.menusService.recalculateAvailability(outletId);
+
+    this.websocketGateway.emitStockChanged(outletId, {
+      outletId,
+      reason: reason as 'SALE' | 'REFUND' | 'OPNAME' | 'ADJUSTMENT' | 'WASTE' | 'RECEIVE',
+      changes: [{ ingredientId: id, qtyDelta: delta }],
+      at: new Date().toISOString(),
+    });
+
+    return result;
   }
 }

@@ -7,6 +7,7 @@ export interface CurrentUser {
   name: string;
   role: UserRole;
   shiftId?: string;
+  stationId?: string | null;
 }
 
 export const CurrentUser = createParamDecorator(

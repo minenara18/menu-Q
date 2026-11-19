@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StockMoveReason } from '@order-q/shared';
 import { MenusService } from '../menus/menus.service';
@@ -71,7 +72,13 @@ export class StockService {
     };
   }
 
-  async reserveStock(outletId: string, items: Array<{ menuId: string; qty: number }>, ticketId: string, userId: string) {
+  async reserveStock(
+    outletId: string,
+    items: Array<{ menuId: string; qty: number }>,
+    ticketId: string,
+    userId: string,
+    txClient?: Prisma.TransactionClient,
+  ): Promise<Array<{ ingredientId: string; qtyDelta: number }>> {
     // Sort by ingredientId to prevent deadlock
     const allRecipeLines: Array<{ ingredientId: string; qty: number; menuId: string }> = [];
 
@@ -95,8 +102,11 @@ export class StockService {
     // Sort by ingredientId to ensure consistent lock order
     allRecipeLines.sort((a, b) => a.ingredientId.localeCompare(b.ingredientId));
 
-    return this.prisma.$transaction(async (tx: import("@prisma/client").Prisma.TransactionClient) => {
-      // Lock ingredients in order
+    const run = async (tx: Prisma.TransactionClient) => {
+      const changes: Array<{ ingredientId: string; qtyDelta: number }> = [];
+      // Lock ingredients in order with an atomic, conditional decrement.
+      // A row only decrements when currentQty >= required qty, so
+      // concurrent checkouts can never drive stock negative.
       for (const rl of allRecipeLines) {
         const ingredient = await tx.ingredient.findUnique({
           where: { id: rl.ingredientId },
@@ -106,15 +116,14 @@ export class StockService {
           throw new NotFoundException(`Ingredient ${rl.ingredientId} not found`);
         }
 
-        if (ingredient.currentQty < rl.qty) {
-          throw new ConflictException(`Insufficient stock for ${ingredient.name}: need ${rl.qty}, have ${ingredient.currentQty}`);
-        }
-
-        // Decrement stock
-        await tx.ingredient.update({
-          where: { id: rl.ingredientId },
+        const updated = await tx.ingredient.updateMany({
+          where: { id: rl.ingredientId, currentQty: { gte: rl.qty } },
           data: { currentQty: { decrement: rl.qty } },
         });
+
+        if (updated.count !== 1) {
+          throw new ConflictException(`Insufficient stock for ${ingredient.name}: need ${rl.qty}, have ${ingredient.currentQty}`);
+        }
 
         // Create stock move
         await tx.stockMove.create({
@@ -128,11 +137,24 @@ export class StockService {
             createdBy: userId,
           },
         });
+        changes.push({ ingredientId: rl.ingredientId, qtyDelta: -rl.qty });
       }
-    });
+      return changes;
+    };
+
+    if (txClient) {
+      return run(txClient);
+    }
+    return this.prisma.$transaction(run);
   }
 
-  async releaseStock(outletId: string, items: Array<{ menuId: string; qty: number }>, ticketId: string, userId: string) {
+  async releaseStock(
+    outletId: string,
+    items: Array<{ menuId: string; qty: number }>,
+    ticketId: string,
+    userId: string,
+    txClient?: Prisma.TransactionClient,
+  ): Promise<Array<{ ingredientId: string; qtyDelta: number }>> {
     const allRecipeLines: Array<{ ingredientId: string; qty: number }> = [];
 
     for (const item of items) {
@@ -154,7 +176,8 @@ export class StockService {
     // Sort by ingredientId for consistent lock order
     allRecipeLines.sort((a, b) => a.ingredientId.localeCompare(b.ingredientId));
 
-    return this.prisma.$transaction(async (tx: import("@prisma/client").Prisma.TransactionClient) => {
+    const run = async (tx: Prisma.TransactionClient) => {
+      const changes: Array<{ ingredientId: string; qtyDelta: number }> = [];
       for (const rl of allRecipeLines) {
         await tx.ingredient.update({
           where: { id: rl.ingredientId },
@@ -172,8 +195,15 @@ export class StockService {
             createdBy: userId,
           },
         });
+        changes.push({ ingredientId: rl.ingredientId, qtyDelta: rl.qty });
       }
-    });
+      return changes;
+    };
+
+    if (txClient) {
+      return run(txClient);
+    }
+    return this.prisma.$transaction(run);
   }
 
   async getStockMoves(outletId: string, query: {

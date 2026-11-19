@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException, BadRequestException }
 import { PrismaService } from '../../prisma/prisma.service';
 import { MenuAvailability } from '@order-q/shared';
 import { Prisma, MenuAvailability as PrismaMenuAvailability } from '@prisma/client';
+import { WebsocketGateway } from '../../websocket/websocket.gateway';
 import { v4 as uuidv4 } from 'uuid';
 
 interface CreateMenuDto {
@@ -46,7 +47,10 @@ export interface MenuWithPortion {
 
 @Injectable()
 export class MenusService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private websocketGateway: WebsocketGateway,
+  ) {}
 
   async findAll(outletId: string, query: {
     station?: string;
@@ -229,6 +233,14 @@ export class MenusService {
     await this.prisma.menu.update({
       where: { id },
       data: { availability: newAvailability as unknown as PrismaMenuAvailability },
+    });
+
+    this.websocketGateway.emitStockChanged(outletId, {
+      outletId,
+      reason: 'MENU_TOGGLE',
+      menuIds: [id],
+      changes: [],
+      at: new Date().toISOString(),
     });
 
     return { availability: newAvailability };

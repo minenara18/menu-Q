@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PaymentGateway, CreatePaymentParams, CreatePaymentResult, WebhookVerificationResult } from './payment-gateway.interface';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 interface XenditQRISResponse {
   id: string;
@@ -62,12 +62,20 @@ export class XenditPaymentGateway implements PaymentGateway {
   }
 
   async verifyWebhook(payload: any, signature: string): Promise<WebhookVerificationResult> {
-    // Verify Xendit webhook signature
-    const expectedSignature = createHmac('sha256', this.secretKey)
+    // Xendit webhook is verified against the webhook/callback secret from the environment.
+    // If the secret is not configured the webhook is always rejected.
+    const webhookSecret = this.configService.get('app.qris.webhookSecret') || this.secretKey;
+    if (!webhookSecret || !signature) {
+      return { valid: false, status: 'failed' };
+    }
+
+    const expectedSignature = createHmac('sha256', webhookSecret)
       .update(JSON.stringify(payload))
       .digest('hex');
 
-    if (signature !== expectedSignature) {
+    const a = Buffer.from(String(signature), 'utf8');
+    const b = Buffer.from(expectedSignature, 'utf8');
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
       return { valid: false, status: 'failed' };
     }
 

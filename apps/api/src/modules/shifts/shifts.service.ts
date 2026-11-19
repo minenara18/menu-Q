@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ShiftStatus } from '@order-q/shared';
-import { v4 as uuidv4 } from 'uuid';
+import { ManagerPinService } from '../auth/manager-pin.service';
 
 interface OpenShiftDto {
   openingCash: number;
@@ -17,7 +17,10 @@ interface CloseShiftDto {
 
 @Injectable()
 export class ShiftsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private managerPin: ManagerPinService,
+  ) {}
 
   async findCurrent(outletId: string) {
     return this.prisma.shift.findFirst({
@@ -134,7 +137,7 @@ export class ShiftsService {
     };
   }
 
-  async close(outletId: string, shiftId: string, userId: string, dto: CloseShiftDto, managerPinHash?: string) {
+  async close(outletId: string, shiftId: string, userId: string, dto: CloseShiftDto) {
     const shift = await this.findById(outletId, shiftId);
 
     if ((shift.status as ShiftStatus) === ShiftStatus.CLOSED) {
@@ -181,8 +184,17 @@ export class ShiftsService {
     const outlet = await this.prisma.outlet.findUnique({ where: { id: outletId } });
     const threshold = outlet?.varianceThreshold || 10000;
 
-    if (Math.abs(variance) > threshold && !dto.managerPin) {
-      throw new BadRequestException('Variance exceeds threshold. Manager PIN required.');
+    if (Math.abs(variance) > threshold) {
+      if (!dto.managerPin) {
+        throw new BadRequestException('Variance exceeds threshold. Manager PIN required.');
+      }
+      // Verifies against active OWNER PINs in the same outlet and writes an audit log entry.
+      await this.managerPin.verify(outletId, dto.managerPin, {
+        action: 'CLOSE_SHIFT_VARIANCE',
+        entity: 'Shift',
+        entityId: shiftId,
+        actorId: userId,
+      });
     }
 
     // Save cash counts

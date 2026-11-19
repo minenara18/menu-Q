@@ -268,6 +268,13 @@ export const CheckoutPaymentSchema = z.object({
   splitGroupId: z.string().optional(),
 });
 
+export const DiscountSchema = z.object({
+  type: z.enum(['amount', 'percent']),
+  value: z.number().min(0),
+}).refine((d) => (d.type === 'percent' ? d.value <= 100 : true), {
+  message: 'Discount percent must be <= 100',
+});
+
 export const CheckoutRequestSchema = z.object({
   items: z.array(CartItemSchema).min(1),
   customerName: z.string().optional(),
@@ -275,6 +282,7 @@ export const CheckoutRequestSchema = z.object({
   tableNumber: z.string().optional(),
   payments: z.array(CheckoutPaymentSchema).min(1),
   idempotencyKey: z.string().uuid(),
+  discount: DiscountSchema.optional(),
 });
 
 export const CheckoutResponseSchema = z.object({
@@ -382,9 +390,12 @@ export interface TicketReadyEvent {
 }
 
 export interface StockChangedEvent {
-  ingredientId: string;
-  menuIds: string[];
-  availability: MenuAvailability;
+  outletId: string;
+  reason: StockMoveReason | 'MENU_TOGGLE';
+  ticketId?: string;
+  menuIds?: string[];
+  changes: Array<{ ingredientId: string; qtyDelta: number }>;
+  at: string;
 }
 
 export interface ShiftClosedEvent {
@@ -406,6 +417,7 @@ export type OpenShiftRequest = z.infer<typeof OpenShiftRequestSchema>;
 export type MenuQuery = z.infer<typeof MenuQuerySchema>;
 export type MenuItem = z.infer<typeof MenuItemSchema>;
 export type CartItem = z.infer<typeof CartItemSchema>;
+export type Discount = z.infer<typeof DiscountSchema>;
 export type CheckoutPayment = z.infer<typeof CheckoutPaymentSchema>;
 export type CheckoutRequest = z.infer<typeof CheckoutRequestSchema>;
 export type CheckoutResponse = z.infer<typeof CheckoutResponseSchema>;

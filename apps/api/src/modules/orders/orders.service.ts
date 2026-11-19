@@ -32,6 +32,7 @@ interface CheckoutDto {
   tableNumber?: string;
   payments: CheckoutPayment[];
   idempotencyKey: string;
+  discount?: { type: 'amount' | 'percent'; value: number };
 }
 
 export interface CheckoutResult {
@@ -55,16 +56,20 @@ export class OrdersService {
       throw new BadRequestException('No active shift in token. Open a shift and sign in again.');
     }
 
-    // Check idempotency
-    const existingPayment = await this.prisma.payment.findFirst({
-      where: { qrisRef: dto.idempotencyKey },
+    // Check idempotency: the Idempotency-Key header is stored on the first payment row.
+    const existingPayment = await this.prisma.payment.findUnique({
+      where: { idempotencyKey: dto.idempotencyKey },
     });
 
     if (existingPayment) {
       // Return existing ticket if found
       const existingTicket = await this.prisma.ticket.findUnique({
         where: { id: existingPayment.ticketId },
-        include: { subtickets: true, orderItems: true, payments: true },
+        include: {
+          subtickets: { include: { station: true } },
+          orderItems: { include: { menu: true } },
+          payments: true,
+        },
       });
       if (existingTicket) {
         return this.buildCheckoutResult(existingTicket);
@@ -120,7 +125,26 @@ export class OrdersService {
 
     const taxAmount = Math.round(subtotal * taxRate);
     const serviceAmount = Math.round(subtotal * serviceRate);
-    const discountAmount = 0; // TODO: implement discounts
+
+    // Optional ticket-level discount (validated). applied only against subtotal+tax+service.
+    let discountAmount = 0;
+    if (dto.discount) {
+      const { type, value } = dto.discount;
+      if (type === 'percent') {
+        if (typeof value !== 'number' || value < 0 || value > 100) {
+          throw new BadRequestException('Discount percent must be between 0 and 100');
+        }
+        discountAmount = Math.round((subtotal + taxAmount + serviceAmount) * (value / 100));
+      } else if (type === 'amount') {
+        if (typeof value !== 'number' || value < 0) {
+          throw new BadRequestException('Discount amount must be non-negative');
+        }
+        discountAmount = Math.min(Math.round(value), subtotal + taxAmount + serviceAmount);
+      } else {
+        throw new BadRequestException('Discount type must be "amount" or "percent"');
+      }
+    }
+
     const totalAmount = subtotal + taxAmount + serviceAmount - discountAmount;
 
     // Validate payments
@@ -138,15 +162,24 @@ export class OrdersService {
       // Cash can be more than total (change given)
     }
 
-    // Generate ticket number
-    const dailyNo = await this.getNextDailyNo(outletId, shiftId);
-    const ticketNumber = `A-${dailyNo.toString().padStart(3, '0')}`;
-
     // Calculate ETA
     const eta = await this.calculateETA(outletId, dto.items, menus);
 
-    // Create ticket, subtickets, order items, payments, and reserve stock in transaction
-    const result = await this.prisma.$transaction(async (tx: import("@prisma/client").Prisma.TransactionClient) => {
+    let stockChanges: Array<{ ingredientId: string; qtyDelta: number }> = [];
+
+    const runCheckout = async () => this.prisma.$transaction(async (tx: import("@prisma/client").Prisma.TransactionClient) => {
+      // Serialize checkouts per shift so dailyNo allocation is race-free
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${outletId} || ':' || ${shiftId}))`;
+
+      // Generate ticket number atomically inside the transaction
+      const lastTicket = await tx.ticket.findFirst({
+        where: { shiftId },
+        orderBy: { dailyNo: 'desc' },
+        select: { dailyNo: true },
+      });
+      const dailyNo = (lastTicket?.dailyNo ?? 0) + 1;
+      const ticketNumber = `A-${dailyNo.toString().padStart(3, '0')}`;
+
       // Create ticket
       const ticket = await tx.ticket.create({
         data: {
@@ -204,7 +237,9 @@ export class OrdersService {
         }
       }
 
-// Create payments
+// Create payments. The idempotency key is stored on the first payment row only;
+      // the DB unique index on idempotencyKey then guarantees exactly one ticket per key.
+      let keyAssigned = false;
       for (const payment of dto.payments) {
         await tx.payment.create({
           data: {
@@ -214,18 +249,49 @@ export class OrdersService {
             status: String(payment.method) === 'QRIS' ? 'PENDING' : 'PAID',
             splitGroupId: payment.splitGroupId,
             qrisRef: payment.method === PaymentMethod.QRIS ? dto.idempotencyKey : null,
+            idempotencyKey: keyAssigned ? null : dto.idempotencyKey,
           },
         });
+        keyAssigned = true;
       }
 
-      // Reserve stock
-      await this.stockService.reserveStock(outletId, dto.items, ticket.id, userId);
-
-      // Recalculate menu availability
-      await this.menusService.recalculateAvailability(outletId);
+      // Reserve stock atomically in the same transaction
+      stockChanges = await this.stockService.reserveStock(outletId, dto.items, ticket.id, userId, tx);
 
       return ticket;
     });
+
+    let result: { id: string };
+    try {
+      result = await runCheckout();
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        // Idempotency race: another identical checkout may have committed first.
+        const existingPayment = await this.prisma.payment.findUnique({
+          where: { idempotencyKey: dto.idempotencyKey },
+        });
+        if (existingPayment) {
+          const existingTicket = await this.prisma.ticket.findUnique({
+            where: { id: existingPayment.ticketId },
+            include: {
+              subtickets: { include: { station: true } },
+              orderItems: { include: { menu: true } },
+              payments: true,
+            },
+          });
+          if (existingTicket) {
+            return this.buildCheckoutResult(existingTicket);
+          }
+        }
+        // Otherwise it was a dailyNo/unique race; retry once.
+        result = await runCheckout();
+      } else {
+        throw error;
+      }
+    }
+
+    // Recalculate menu availability now that the transaction committed
+    await this.menusService.recalculateAvailability(outletId);
 
     // Fetch complete ticket with relations
     const completeTicket = await this.prisma.ticket.findUnique({
@@ -239,18 +305,17 @@ export class OrdersService {
 
     // Emit WebSocket events
     this.websocketGateway.emitTicketCreated(outletId, completeTicket!);
+    if (stockChanges.length > 0) {
+      this.websocketGateway.emitStockChanged(outletId, {
+        outletId,
+        reason: 'SALE',
+        ticketId: result.id,
+        changes: stockChanges,
+        at: new Date().toISOString(),
+      });
+    }
 
     return this.buildCheckoutResult(completeTicket!);
-  }
-
-  private async getNextDailyNo(outletId: string, shiftId: string): Promise<number> {
-    const lastTicket = await this.prisma.ticket.findFirst({
-      where: { shiftId },
-      orderBy: { dailyNo: 'desc' },
-      select: { dailyNo: true },
-    });
-
-    return (lastTicket?.dailyNo || 0) + 1;
   }
 
   private async calculateETA(outletId: string, items: CartItem[], menus: Array<{ id: string; stationId: string; avgMakeSeconds: number }>): Promise<{ min: number; max: number }> {

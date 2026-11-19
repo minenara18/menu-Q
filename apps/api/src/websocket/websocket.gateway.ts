@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 interface AuthenticatedSocket extends Socket {
   user?: {
@@ -18,6 +19,7 @@ interface AuthenticatedSocket extends Socket {
     outletId: string;
     role: string;
     shiftId?: string;
+    stationId?: string | null;
   };
 }
 
@@ -37,6 +39,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   constructor(
     private jwtService: JwtService,
     private configService: ConfigService,
+    private prisma: PrismaService,
   ) {}
 
   async handleConnection(client: AuthenticatedSocket) {
@@ -68,13 +71,17 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       }
       this.outletRooms.get(payload.outletId)!.add(client.id);
 
-      // If maker, join station room
+      // If maker, join only the room of their assigned station
       if (payload.role === 'MAKER') {
-        // In real implementation, get user's assigned station
-        // For now, join all stations
-        const stations = ['BAR', 'KITCHEN', 'PASTRY'];
-        for (const station of stations) {
-          client.join(`station:${payload.outletId}:${station}`);
+        if (payload.stationId) {
+          const station = await this.prisma.station.findUnique({ where: { id: payload.stationId }, select: { code: true } });
+          if (station) {
+            client.join(`station:${payload.outletId}:${station.code}`);
+          } else {
+            this.logger.warn(`Maker ${payload.sub} has unknown stationId ${payload.stationId}`);
+          }
+        } else {
+          this.logger.warn(`Maker ${payload.sub} is not assigned to any station; joining no station room`);
         }
       }
 

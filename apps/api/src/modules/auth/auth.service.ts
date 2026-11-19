@@ -17,6 +17,7 @@ export interface TokenPayload {
   name: string;
   role: UserRole;
   shiftId?: string;
+  stationId?: string | null;
 }
 
 @Injectable()
@@ -72,6 +73,7 @@ export class AuthService {
       name: user.name,
       role: user.role as UserRole,
       shiftId: shift?.id,
+      stationId: user.stationId,
     };
 
     const accessToken = this.jwtService.sign(payload);
@@ -128,6 +130,7 @@ export class AuthService {
         name: user.name,
         role: user.role as UserRole,
         shiftId: payload.shiftId,
+        stationId: user.stationId,
       };
 
       const accessToken = this.jwtService.sign(newPayload);

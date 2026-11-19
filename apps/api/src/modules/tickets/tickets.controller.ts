@@ -58,6 +58,9 @@ export class TicketsController {
   @ApiQuery({ name: 'offset', required: false, type: Number })
   async findAll(
     @CurrentUser('outletId') outletId: string,
+    @CurrentUser('sub') userId: string,
+    @CurrentUser('role') userRole: string,
+    @CurrentUser('stationId') userStationId: string | null,
     @Query('status') status?: TicketStatus,
     @Query('station') station?: StationCode,
     @Query('q') q?: string,
@@ -74,7 +77,7 @@ export class TicketsController {
       dateTo: dateTo ? new Date(dateTo) : undefined,
       limit: limit ? parseInt(limit) : 50,
       offset: offset ? parseInt(offset) : 0,
-    });
+    }, { id: userId, role: userRole, stationId: userStationId });
   }
 
   @Get(':id')
@@ -94,10 +97,11 @@ export class TicketsController {
     @CurrentUser('outletId') outletId: string,
     @CurrentUser('sub') userId: string,
     @CurrentUser('role') userRole: string,
+    @CurrentUser('stationId') userStationId: string | null,
     @Param('subticketId') subticketId: string,
     @Body() body: z.infer<typeof SubTicketStatusSchema>,
   ) {
-    return this.ticketsService.updateSubTicketStatus(outletId, subticketId, userId, userRole, body);
+    return this.ticketsService.updateSubTicketStatus(outletId, subticketId, userId, userRole, body, userStationId);
   }
 
   @Patch(':id/status')
