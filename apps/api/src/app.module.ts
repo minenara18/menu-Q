@@ -18,6 +18,7 @@ import { ShiftsModule } from './modules/shifts/shifts.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { UsersModule } from './modules/users/users.module';
 import { WebsocketModule } from './websocket/websocket.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { WebsocketModule } from './websocket/websocket.module';
     SettingsModule,
     UsersModule,
     WebsocketModule,
+    HealthModule,
   ],
   providers: [
     {

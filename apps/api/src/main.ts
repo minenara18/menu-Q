@@ -42,7 +42,8 @@ async function bootstrap() {
   }
 
   const apiPrefix = configService.get<string>('app.apiPrefix') ?? 'v1';
-  app.setGlobalPrefix(apiPrefix);
+  // Health probes are intentionally outside the versioned prefix.
+  app.setGlobalPrefix(apiPrefix, { exclude: ['health', 'health/ready'] });
   app.enableCors({
     origin: configService.get<string>('app.socket.corsOrigin') ?? '*',
     credentials: true,

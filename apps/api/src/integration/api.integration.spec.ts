@@ -22,6 +22,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { PaymentsGateway } from '../modules/payments/payments.gateway';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import { ManagerPinService } from '../modules/auth/manager-pin.service';
 import { XenditPaymentGateway } from '../modules/payments/xendit-payment.gateway';
 import { AppModule } from '../app.module';
@@ -52,7 +53,7 @@ describe('Order-Q API (integration, separate DB)', () => {
         transformOptions: { enableImplicitConversion: true },
       }),
     );
-    app.setGlobalPrefix('v1');
+    app.setGlobalPrefix('v1', { exclude: ['health', 'health/ready'] });
     await app.init();
     server = app.getHttpServer();
   });
@@ -67,6 +68,14 @@ describe('Order-Q API (integration, separate DB)', () => {
     // Clear in-memory manager-PIN lockout state between tests
     const managerPin = app.get(ManagerPinService) as unknown as { attempts: Map<string, unknown> };
     managerPin.attempts?.clear();
+    // Clear in-memory throttler state so rate-limit tests are deterministic.
+    const storage = app.get(ThrottlerStorage) as unknown as {
+      storage: Record<string, unknown>;
+      timeoutIds: NodeJS.Timeout[];
+    };
+    for (const key of Object.keys(storage.storage)) delete storage.storage[key];
+    storage.timeoutIds.forEach(clearTimeout);
+    storage.timeoutIds = [];
   });
 
   async function login(userId: string) {
@@ -439,5 +448,57 @@ describe('Order-Q API (integration, separate DB)', () => {
     const gatewayNoSecret = new XenditPaymentGateway(cfgNoSecret);
     const rejected = await gatewayNoSecret.verifyWebhook(payload, goodSig);
     expect(rejected.valid).toBe(false);
+  });
+
+  it('health: liveness and readiness respond without auth and are not throttled', async () => {
+    const live = await request(server).get('/health');
+    expect(live.status).toBe(200);
+    expect(live.body.status).toBe('ok');
+
+    const ready = await request(server).get('/health/ready');
+    expect(ready.status).toBe(200);
+    expect(ready.body.status).toBe('ready');
+    expect(ready.body.database).toBe('up');
+  });
+
+  it('throttle: repeated PIN logins for the same user/IP end in 429', async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const res = await request(server)
+        .post('/v1/auth/pin-login')
+        .send({ outletId: OUTLET, userId: ADI, pin: '123456' });
+      statuses.push(res.status);
+    }
+    expect(statuses.filter((s) => s === 200)).toHaveLength(5);
+    expect(statuses[5]).toBe(429);
+  });
+
+  it('QRIS expiry sweep is safe when two callers run in parallel (no double refund)', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+    const idem = IDEM();
+    const qr = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem)
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'QRIS', amount: 20880 }], idem));
+    expect(qr.status).toBe(200);
+    const ticketId = qr.body.ticket.id as string;
+
+    await prisma.payment.updateMany({
+      where: { ticketId },
+      data: { createdAt: new Date(Date.now() - 6 * 60 * 1000) },
+    });
+
+    const gateway = app.get(PaymentsGateway) as unknown as { checkExpiredPayments(): Promise<void> };
+    await Promise.all([gateway.checkExpiredPayments(), gateway.checkExpiredPayments()]);
+
+    const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: ticketId } });
+    expect(ticket.status).toBe('CANCELLED');
+
+    const refunds = await prisma.stockMove.count({ where: { refId: ticketId, reason: 'REFUND' } });
+    expect(refunds).toBe(3); // exactly one refund pass, not two
+
+    const esp = await prisma.ingredient.findUniqueOrThrow({ where: { id: SEED_IDS.ingEspresso } });
+    expect(esp.currentQty).toBe(2000);
   });
 });

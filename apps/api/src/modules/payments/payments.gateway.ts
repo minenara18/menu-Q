@@ -1,7 +1,16 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TicketsService } from '../tickets/tickets.service';
 
+/**
+ * Background sweep that expires stale QRIS payments.
+ *
+ * Multi-instance safety: the whole sweep runs inside one transaction that first
+ * takes a Postgres transaction-scoped advisory lock. A second instance blocks on
+ * the lock, and by the time it proceeds the payments are already FAILED, so it
+ * never cancels the same ticket twice or refunds stock twice.
+ */
 @Injectable()
 export class PaymentsGateway implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PaymentsGateway.name);
@@ -10,59 +19,73 @@ export class PaymentsGateway implements OnModuleInit, OnModuleDestroy {
   constructor(
     private prisma: PrismaService,
     private ticketsService: TicketsService,
+    private configService: ConfigService,
   ) {}
 
   onModuleInit() {
-    // Check for expired QRIS payments every minute
+    const intervalMs = this.configService.get<number>('app.qris.sweepIntervalMs') ?? 60_000;
     this.interval = setInterval(() => {
       void this.checkExpiredPayments();
-    }, 60 * 1000);
+    }, intervalMs);
+    this.logger.log(`QRIS expiry sweep scheduled every ${intervalMs}ms`);
   }
 
   onModuleDestroy() {
     if (this.interval) {
       clearInterval(this.interval);
+      this.interval = null;
     }
   }
 
-  private async checkExpiredPayments() {
+  async checkExpiredPayments() {
     try {
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      await this.prisma.$transaction(async (tx) => {
+        // Serialize sweeps across all API instances.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'orderq:qris-expiry-sweep'}), 0)`;
 
-      const expiredPayments = await this.prisma.payment.findMany({
-        where: {
-          method: 'QRIS',
-          status: 'PENDING',
-          createdAt: { lt: fiveMinutesAgo },
-        },
-        include: { ticket: { include: { orderItems: true } } },
-      });
+        const expiryMinutes = this.configService.get<number>('app.qris.expiryMinutes') ?? 5;
+        const cutoff = new Date(Date.now() - expiryMinutes * 60 * 1000);
 
-      for (const payment of expiredPayments) {
-        // Mark as failed
-        await this.prisma.payment.update({
-          where: { id: payment.id },
-          data: { status: 'FAILED' },
+        const expiredPayments = await tx.payment.findMany({
+          where: {
+            method: 'QRIS',
+            status: 'PENDING',
+            createdAt: { lt: cutoff },
+          },
+          include: { ticket: { include: { orderItems: true } } },
         });
 
-        // Check if all payments for this ticket are failed
-        const allPayments = await this.prisma.payment.findMany({
-          where: { ticketId: payment.ticketId },
-        });
+        for (const payment of expiredPayments) {
+          try {
+            if (payment.status !== 'PENDING') continue;
 
-        const allFailed = allPayments.every(
-          (p: typeof allPayments[0]) => p.status === 'FAILED' || p.status === 'REFUNDED',
-        );
+            await tx.payment.update({
+              where: { id: payment.id },
+              data: { status: 'FAILED' },
+            });
 
-        if (allFailed) {
-          // Cancel ticket and release stock (system-initiated: no manager PIN required)
-          const ticket = payment.ticket;
-          await this.ticketsService.cancelTicket(ticket.outletId, ticket.id, 'system', {
-            managerPin: '',
-            reason: 'QRIS payment timeout (5 min)',
-          }, { system: true });
+            const allPayments = await tx.payment.findMany({
+              where: { ticketId: payment.ticketId },
+            });
+
+            const allFailed = allPayments.every(
+              (p: typeof allPayments[number]) => p.status === 'FAILED' || p.status === 'REFUNDED',
+            );
+
+            if (allFailed) {
+              // Cancel ticket and release stock (system-initiated: no manager PIN required)
+              const ticket = payment.ticket;
+              await this.ticketsService.cancelTicket(ticket.outletId, ticket.id, 'system', {
+                managerPin: '',
+                reason: `QRIS payment timeout (${expiryMinutes} min)`,
+              }, { system: true });
+            }
+          } catch (error) {
+            // Defensive: a concurrent actor may already have cancelled this ticket.
+            this.logger.error(`Failed to expire QRIS payment ${payment.id}`, error as Error);
+          }
         }
-      }
+      });
     } catch (error) {
       this.logger.error('Error checking expired payments', error as Error);
     }

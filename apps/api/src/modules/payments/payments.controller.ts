@@ -13,6 +13,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -60,6 +61,8 @@ export class PaymentsController {
   @Post('webhooks/qris')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'QRIS webhook endpoint (Xendit/Midtrans)' })
+  // Generous but bounded: webhooks are called by the payment provider, not humans.
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @ApiHeader({ name: 'x-callback-signature', description: 'Webhook signature', required: false })
   async handleQRISWebhook(
     @Headers('x-callback-signature') signature: string,

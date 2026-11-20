@@ -10,6 +10,6 @@ module.exports = {
   coverageDirectory: '../coverage',
   testEnvironment: 'node',
   moduleNameMapper: {
-    '^@order-q/shared$': '<rootDir>/../../packages/shared/src',
+    '^@order-q/shared$': '<rootDir>/../../../packages/shared/src',
   },
 };
