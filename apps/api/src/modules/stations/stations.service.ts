@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StationCode } from '@order-q/shared';
+import { orderQueue } from '../../common/queue/queue-math';
 import { v4 as uuidv4 } from 'uuid';
 
 const STATION_DEFAULTS: Record<StationCode, { name: string; color: string; slaMinutes: number }> = {
@@ -94,6 +95,56 @@ export class StationsService {
 
     await this.prisma.station.delete({ where: { id } });
     return { success: true };
+  }
+
+  /** Ordered, transparent priority queue for one station. */
+  async getQueue(outletId: string, stationId: string) {
+    const station = await this.prisma.station.findFirst({ where: { id: stationId, outletId } });
+    if (!station) {
+      throw new NotFoundException('Station not found');
+    }
+
+    const active = await this.prisma.subTicket.findMany({
+      where: { stationId, status: { in: ['ORDERED', 'IN_PROGRESS'] } },
+      include: {
+        ticket: { select: { ticketNumber: true, customerName: true, orderType: true } },
+        orderItems: { include: { menu: { select: { name: true } } } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const byId = new Map(active.map((subticket: typeof active[number]) => [subticket.id, subticket]));
+    const ranked = orderQueue(
+      active.map((subticket: typeof active[number]) => ({
+        id: subticket.id,
+        stationId: subticket.stationId,
+        createdAtMs: subticket.createdAt.getTime(),
+        slaSeconds: station.slaMinutes * 60,
+        priorityBump: subticket.priorityBump ?? 0,
+      })),
+      Date.now(),
+    );
+
+    return ranked.map((item) => {
+      const subticket = byId.get(item.entry.id)!;
+      return {
+        subticketId: subticket.id,
+        ticketId: subticket.ticketId,
+        ticketNumber: subticket.ticket?.ticketNumber,
+        customerName: subticket.ticket?.customerName,
+        status: subticket.status,
+        rank: item.rank,
+        score: item.score,
+        reason: item.reason,
+        items: subticket.orderItems.map(
+          (orderItem: typeof subticket.orderItems[number]) => ({
+            name: orderItem.menu.name,
+            qty: orderItem.qty,
+            note: orderItem.note,
+          }),
+        ),
+      };
+    });
   }
 
   async ensureDefaults(outletId: string) {

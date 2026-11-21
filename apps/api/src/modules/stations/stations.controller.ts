@@ -9,6 +9,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { StationsService } from './stations.service';
@@ -47,6 +48,21 @@ export class StationsController {
   @ApiOperation({ summary: 'List all stations' })
   async findAll(@CurrentUser('outletId') outletId: string) {
     return this.stationsService.findAll(outletId);
+  }
+
+  @Get(':id/queue')
+  @Roles(UserRole.CASHIER, UserRole.MAKER, UserRole.OWNER)
+  @ApiOperation({ summary: 'Get the ordered priority queue for a station' })
+  async getQueue(
+    @CurrentUser('outletId') outletId: string,
+    @CurrentUser('role') userRole: string,
+    @CurrentUser('stationId') userStationId: string | null,
+    @Param('id') id: string,
+  ) {
+    if (userRole === UserRole.MAKER && userStationId !== id) {
+      throw new ForbiddenException('Maker hanya boleh melihat antrean stasiunnya sendiri');
+    }
+    return this.stationsService.getQueue(outletId, id);
   }
 
   @Get(':id')

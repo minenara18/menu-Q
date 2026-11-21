@@ -6,6 +6,13 @@ import { WebsocketGateway } from '../../websocket/websocket.gateway';
 import { StockService } from '../stock/stock.service';
 import { MenusService } from '../menus/menus.service';
 import { ManagerPinService } from '../auth/manager-pin.service';
+import { OrdersService } from '../orders/orders.service';
+import {
+  DEFAULT_MAKE_SECONDS,
+  computePriorityScore,
+  nextEma,
+  orderQueue,
+} from '../../common/queue/queue-math';
 
 interface ActingUser {
   id: string;
@@ -34,6 +41,7 @@ export class TicketsService {
     private stockService: StockService,
     private menusService: MenusService,
     private managerPin: ManagerPinService,
+    private ordersService: OrdersService,
   ) {}
 
   async findAll(outletId: string, query: {
@@ -88,7 +96,68 @@ export class TicketsService {
       this.prisma.ticket.count({ where }),
     ]);
 
+    await this.attachPriorityMetadata(outletId, tickets);
+
     return { tickets, total };
+  }
+
+  /**
+   * Attach transparent priority ordering (score + short reason + rank) to the
+   * active subtickets of the returned tickets. Ranks are per station.
+   */
+  private async attachPriorityMetadata(outletId: string, tickets: any[]) {
+    const activeSubtickets = await this.prisma.subTicket.findMany({
+      where: { ticket: { outletId }, status: { in: ['ORDERED', 'IN_PROGRESS'] } },
+      include: { station: true },
+    });
+
+    const byStation = new Map<string, typeof activeSubtickets>();
+    for (const subticket of activeSubtickets) {
+      const list = byStation.get(subticket.stationId) ?? [];
+      list.push(subticket);
+      byStation.set(subticket.stationId, list);
+    }
+
+    const rankedById = new Map<string, { score: number; reason: string; rank: number }>();
+    for (const list of byStation.values()) {
+      const ranked = orderQueue(
+        list.map((subticket: typeof activeSubtickets[number]) => ({
+          id: subticket.id,
+          stationId: subticket.stationId,
+          createdAtMs: subticket.createdAt.getTime(),
+          slaSeconds: subticket.station.slaMinutes * 60,
+          priorityBump: subticket.priorityBump ?? 0,
+        })),
+        Date.now(),
+      );
+      for (const item of ranked) {
+        rankedById.set(item.entry.id, { score: item.score, reason: item.reason, rank: item.rank });
+      }
+    }
+
+    for (const ticket of tickets) {
+      for (const subticket of ticket.subtickets ?? []) {
+        const ranked = rankedById.get(subticket.id);
+        if (ranked) {
+          subticket.priority = ranked;
+          subticket.priorityReason = ranked.reason;
+        }
+      }
+      ticket.subtickets?.sort(
+        (a: { priority?: { score: number } }, b: { priority?: { score: number } }) =>
+          (a.priority?.score ?? 0) - (b.priority?.score ?? 0),
+      );
+      const best = ticket.subtickets?.find((s: { priority?: { score: number; reason: string } }) => s.priority);
+      if (best) {
+        ticket.priorityReason = best.priority.reason;
+        ticket.priorityScore = best.priority.score;
+      }
+    }
+
+    tickets.sort(
+      (a: { priorityScore?: number }, b: { priorityScore?: number }) =>
+        (a.priorityScore ?? Number.MAX_SAFE_INTEGER) - (b.priorityScore ?? Number.MAX_SAFE_INTEGER),
+    );
   }
 
   async findById(outletId: string, id: string) {
@@ -166,10 +235,59 @@ export class TicketsService {
 
     // If all subtickets ready, emit ticket ready event
     if (dto.status === SubTicketStatus.READY) {
+      // Learn the real make time from this subticket, then refresh the ticket ETA.
+      await this.learnMakeTime(updated);
+      await this.ordersService.recalculateTicketEta(outletId, updated.ticketId);
+      this.websocketGateway.emitStationQueueUpdated(outletId, {
+        outletId,
+        stationId: updated.stationId,
+        subticketId: updated.id,
+        ticketId: updated.ticketId,
+        reason: 'SUBTICKET_READY',
+      });
       await this.checkAndEmitTicketReady(outletId, subticket.ticketId);
     }
 
     return updated;
+  }
+
+  /**
+   * Update each menu's avgMakeSeconds with an EMA of the subticket duration
+   * (ready_at - started_at). The sample count is persisted so the category
+   * fallback is used until MIN_SAMPLE_COUNT real observations exist.
+   */
+  private async learnMakeTime(subticket: { id: string; startedAt: Date | null; readyAt: Date | null }) {
+    if (!subticket.startedAt || !subticket.readyAt) return;
+
+    const sampleSeconds = Math.max(
+      0,
+      (subticket.readyAt.getTime() - subticket.startedAt.getTime()) / 1000,
+    );
+
+    const orderItems = await this.prisma.orderItem.findMany({
+      where: { subticketId: subticket.id },
+      include: { menu: { include: { category: true } } },
+    });
+
+    const seen = new Set<string>();
+    for (const orderItem of orderItems) {
+      if (seen.has(orderItem.menuId)) continue;
+      seen.add(orderItem.menuId);
+
+      const menu = orderItem.menu;
+      const fallback = menu.category?.defaultMakeSeconds ?? DEFAULT_MAKE_SECONDS;
+      const previous = menu.avgMakeSeconds > 0 ? menu.avgMakeSeconds : fallback;
+      const count = menu.makeSampleCount ?? 0;
+      const next = nextEma(previous, sampleSeconds, count);
+
+      await this.prisma.menu.update({
+        where: { id: menu.id },
+        data: {
+          avgMakeSeconds: Math.round(next),
+          makeSampleCount: { increment: 1 },
+        },
+      });
+    }
   }
 
   async updateTicketStatus(outletId: string, ticketId: string, userId: string, dto: TicketStatusUpdate) {
@@ -301,6 +419,69 @@ export class TicketsService {
     });
 
     return updated;
+  }
+
+  /** Manual maker bump: raises a subticket's priority and writes an audit log. */
+  async bumpSubticket(
+    outletId: string,
+    subticketId: string,
+    userId: string,
+    userRole: string,
+    userStationId: string | null,
+    reason?: string,
+  ) {
+    const subticket = await this.prisma.subTicket.findFirst({
+      where: { id: subticketId, ticket: { outletId } },
+      include: { station: true, ticket: true },
+    });
+
+    if (!subticket) {
+      throw new NotFoundException('Sub-ticket not found');
+    }
+
+    if (userRole === 'MAKER') {
+      if (!userStationId || subticket.stationId !== userStationId) {
+        throw new ForbiddenException('Maker hanya boleh mengubah sub-tiket stasiunnya sendiri');
+      }
+    }
+
+    const updated = await this.prisma.subTicket.update({
+      where: { id: subticket.id },
+      data: { priorityBump: { increment: 1 } },
+      include: { station: true, ticket: true },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        outletId,
+        actorId: userId,
+        action: 'SUBTICKET_PRIORITY_BUMP',
+        entity: 'SubTicket',
+        entityId: subticket.id,
+        diff: {
+          reason: reason ?? '',
+          newBump: updated.priorityBump,
+          ticketId: subticket.ticketId,
+        },
+      },
+    });
+
+    const { score, reason: priorityReason } = computePriorityScore({
+      createdAtMs: updated.createdAt.getTime(),
+      slaSeconds: updated.station.slaMinutes * 60,
+      nowMs: Date.now(),
+      priorityBump: updated.priorityBump,
+    });
+
+    this.websocketGateway.emitStationQueueUpdated(outletId, {
+      outletId,
+      stationId: updated.stationId,
+      subticketId: updated.id,
+      ticketId: updated.ticketId,
+      reason: 'PRIORITY_BUMP',
+    });
+
+    return { ...updated, priority: { score, reason: priorityReason } };
   }
 
   private async updateAggregateTicketStatus(ticketId: string) {

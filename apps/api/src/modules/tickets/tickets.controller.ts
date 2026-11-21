@@ -39,6 +39,10 @@ const CancelTicketSchema = z.object({
   reason: z.string().min(1).max(200),
 });
 
+const BumpPrioritySchema = z.object({
+  reason: z.string().min(1).max(200).optional(),
+});
+
 @ApiTags('tickets')
 @Controller('tickets')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -88,6 +92,21 @@ export class TicketsController {
     @Param('id') id: string,
   ) {
     return this.ticketsService.findById(outletId, id);
+  }
+
+  @Post('subtickets/:subticketId/priority/bump')
+  @Roles(UserRole.MAKER, UserRole.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Manually raise a subticket priority (maker)' })
+  async bumpSubticketPriority(
+    @CurrentUser('outletId') outletId: string,
+    @CurrentUser('sub') userId: string,
+    @CurrentUser('role') userRole: string,
+    @CurrentUser('stationId') userStationId: string | null,
+    @Param('subticketId') subticketId: string,
+    @Body() body: z.infer<typeof BumpPrioritySchema>,
+  ) {
+    return this.ticketsService.bumpSubticket(outletId, subticketId, userId, userRole, userStationId, body.reason);
   }
 
   @Patch('subtickets/:subticketId/status')

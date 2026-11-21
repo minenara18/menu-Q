@@ -175,6 +175,14 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.server.to(`display:${outletId}`).emit('ticket:ready', event);
   }
 
+  emitTicketEtaUpdated(outletId: string, event: any) {
+    this.server.to(`outlet:${outletId}`).emit('ticket:eta-updated', event);
+  }
+
+  emitStationQueueUpdated(outletId: string, event: any) {
+    this.server.to(`outlet:${outletId}`).emit('station:queue-updated', event);
+  }
+
   emitStockChanged(outletId: string, event: any) {
     this.server.to(`outlet:${outletId}`).emit('stock:changed', event);
   }

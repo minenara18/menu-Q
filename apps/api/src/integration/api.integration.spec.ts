@@ -22,6 +22,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { PaymentsGateway } from '../modules/payments/payments.gateway';
+import { WebsocketGateway } from '../websocket/websocket.gateway';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import { ManagerPinService } from '../modules/auth/manager-pin.service';
 import { XenditPaymentGateway } from '../modules/payments/xendit-payment.gateway';
@@ -500,5 +501,143 @@ describe('Order-Q API (integration, separate DB)', () => {
 
     const esp = await prisma.ingredient.findUniqueOrThrow({ where: { id: SEED_IDS.ingEspresso } });
     expect(esp.currentQty).toBe(2000);
+  });
+
+  it('ETA: checkout and validate return a min/max range', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+    const idem = IDEM();
+    const res = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem)
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem));
+    expect(res.status).toBe(200);
+    expect(res.body.ticket.etaMin).toBeGreaterThanOrEqual(1);
+    expect(res.body.ticket.etaMax).toBeGreaterThanOrEqual(res.body.ticket.etaMin);
+
+    const val = await request(server)
+      .post('/v1/orders/validate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ items: [{ menuId: KOPI_SUSU, qty: 1 }] });
+    expect(val.status).toBe(200);
+    expect(val.body.eta.min).toBeGreaterThanOrEqual(1);
+    expect(val.body.eta.max).toBeGreaterThanOrEqual(val.body.eta.min);
+  });
+
+  it('ETA: completing a subticket learns avgMakeSeconds and re-emits the ETA', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+    const idem = IDEM();
+    const res = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem)
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem));
+    expect(res.status).toBe(200);
+    const barSub = res.body.ticket.subtickets.find((s: { stationCode: string }) => s.stationCode === 'BAR');
+    const makerToken = await login(BUDI);
+
+    const inProgress = await request(server)
+      .patch(`/v1/tickets/subtickets/${barSub.id}/status`)
+      .set('Authorization', `Bearer ${makerToken}`)
+      .send({ status: 'IN_PROGRESS' });
+    expect(inProgress.status).toBe(200);
+
+    // Pretend the drink took 5 minutes to make.
+    await prisma.subTicket.update({
+      where: { id: barSub.id },
+      data: { startedAt: new Date(Date.now() - 300_000) },
+    });
+
+    const etaSpy = jest
+      .spyOn(app.get(WebsocketGateway), 'emitTicketEtaUpdated')
+      .mockImplementation(() => undefined);
+
+    const ready = await request(server)
+      .patch(`/v1/tickets/subtickets/${barSub.id}/status`)
+      .set('Authorization', `Bearer ${makerToken}`)
+      .send({ status: 'READY' });
+    expect(ready.status).toBe(200);
+
+    const menu = await prisma.menu.findUniqueOrThrow({ where: { id: KOPI_SUSU } });
+    expect(menu.makeSampleCount).toBe(1);
+    expect(menu.avgMakeSeconds).toBe(300); // first sample replaces the fallback
+    expect(etaSpy).toHaveBeenCalled();
+    etaSpy.mockRestore();
+  });
+
+  it('priority: maker bump is audited, returned with a reason, and emitted', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+    const idem = IDEM();
+    const res = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem)
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem));
+    expect(res.status).toBe(200);
+    const barSub = res.body.ticket.subtickets.find((s: { stationCode: string }) => s.stationCode === 'BAR');
+    const makerToken = await login(BUDI);
+
+    const queueSpy = jest
+      .spyOn(app.get(WebsocketGateway), 'emitStationQueueUpdated')
+      .mockImplementation(() => undefined);
+
+    const bump = await request(server)
+      .post(`/v1/tickets/subtickets/${barSub.id}/priority/bump`)
+      .set('Authorization', `Bearer ${makerToken}`)
+      .send({ reason: 'pelanggan buru-buru' });
+    expect(bump.status).toBe(200);
+    expect(bump.body.priorityBump).toBe(1);
+    expect(bump.body.priority.reason).toBe('bump manual');
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { entityId: barSub.id, action: 'SUBTICKET_PRIORITY_BUMP' },
+    });
+    expect(audit).not.toBeNull();
+    expect(queueSpy).toHaveBeenCalled();
+    queueSpy.mockRestore();
+
+    // Maker cannot bump another station's subticket.
+    const idem2 = IDEM();
+    const kitchen = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem2)
+      .send(checkoutBody([{ menuId: MIE_GORENG, qty: 1 }], [{ method: 'CASH', amount: 19720 }], idem2));
+    expect(kitchen.status).toBe(200);
+    const kitchenSub = kitchen.body.ticket.subtickets.find((s: { stationCode: string }) => s.stationCode === 'KITCHEN');
+    const forbidden = await request(server)
+      .post(`/v1/tickets/subtickets/${kitchenSub.id}/priority/bump`)
+      .set('Authorization', `Bearer ${makerToken}`)
+      .send({});
+    expect(forbidden.status).toBe(403);
+  });
+
+  it('priority: station queue endpoint returns ordered entries with reasons', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+    for (let i = 0; i < 2; i++) {
+      const idem = IDEM();
+      const res = await request(server)
+        .post('/v1/orders/checkout')
+        .set('Authorization', `Bearer ${token}`)
+        .set('Idempotency-Key', idem)
+        .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem));
+      expect(res.status).toBe(200);
+    }
+
+    const res = await request(server)
+      .get(`/v1/stations/${SEED_IDS.stationBar}/queue`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+    expect(res.body[0].rank).toBe(1);
+    expect(res.body[1].rank).toBe(2);
+    expect(res.body[0].reason).toBe('FIFO');
+
+    // Maker may only inspect their own station queue.
+    const makerToken = await login(BUDI);
+    const forbidden = await request(server)
+      .get(`/v1/stations/${SEED_IDS.stationKitchen}/queue`)
+      .set('Authorization', `Bearer ${makerToken}`);
+    expect(forbidden.status).toBe(403);
   });
 });

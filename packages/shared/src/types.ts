@@ -64,6 +64,7 @@ export interface Category extends BaseEntity {
   name: string;
   displayOrder: number;
   isActive: boolean;
+  defaultMakeSeconds: number; // fallback make time until a menu has enough samples
 }
 
 // Station
@@ -90,6 +91,7 @@ export interface Menu extends BaseEntity {
   isActive: boolean;
   availability: MenuAvailability;
   avgMakeSeconds: number; // learned average, fallback default
+  makeSampleCount: number; // completed subtickets used to learn avgMakeSeconds
   category?: Category;
   station?: Station;
   recipeLines?: RecipeLine[];
@@ -158,6 +160,7 @@ export interface SubTicket extends BaseEntity {
   startedAt?: Date;
   readyAt?: Date;
   priorityScore: number; // lower = higher priority
+  priorityBump: number; // manual maker bumps
   station?: Station;
   ticket?: Ticket;
 }
@@ -355,8 +358,10 @@ export const CancelTicketRequestSchema = z.object({
 export interface SocketEvents {
   'ticket:created': TicketCreatedEvent;
   'ticket:updated': TicketUpdatedEvent;
+  'ticket:eta-updated': TicketEtaUpdatedEvent;
   'subticket:updated': SubTicketUpdatedEvent;
   'ticket:ready': TicketReadyEvent;
+  'station:queue-updated': StationQueueUpdatedEvent;
   'stock:changed': StockChangedEvent;
   'shift:closed': ShiftClosedEvent;
   'printer:status': PrinterStatusEvent;
@@ -387,6 +392,21 @@ export interface TicketReadyEvent {
   ticketNumber: string;
   customerName?: string;
   orderType: OrderType;
+}
+
+export interface TicketEtaUpdatedEvent {
+  ticketId: string;
+  ticketNumber: string;
+  etaMin: number;
+  etaMax: number;
+}
+
+export interface StationQueueUpdatedEvent {
+  outletId: string;
+  stationId?: string;
+  subticketId?: string;
+  ticketId?: string;
+  reason: 'TICKET_CREATED' | 'SUBTICKET_READY' | 'PRIORITY_BUMP';
 }
 
 export interface StockChangedEvent {

@@ -12,6 +12,21 @@ import { ShiftsService } from '../shifts/shifts.service';
 import { Prisma, OrderType as PrismaOrderType, PaymentMethod as PrismaPaymentMethod } from '@prisma/client';
 import { PaymentMethod, PaymentStatus, TicketStatus, SubTicketStatus, OrderType } from '@order-q/shared';
 import { WebsocketGateway } from '../../websocket/websocket.gateway';
+import {
+  DEFAULT_MAKE_SECONDS,
+  estimateStationEtaSeconds,
+  estimateTicketEta,
+  resolveAvgMakeSeconds,
+} from '../../common/queue/queue-math';
+
+/** Minimal menu shape needed for ETA computation. */
+interface EtaMenu {
+  id: string;
+  stationId: string;
+  avgMakeSeconds: number;
+  makeSampleCount?: number;
+  category?: { defaultMakeSeconds?: number } | null;
+}
 
 interface CartItem {
   menuId: string;
@@ -86,7 +101,7 @@ export class OrdersService {
     const menuIds = dto.items.map((i) => i.menuId);
     const menus = await this.prisma.menu.findMany({
       where: { id: { in: menuIds }, outletId },
-      include: { recipeLines: { include: { ingredient: true } }, station: true },
+      include: { recipeLines: { include: { ingredient: true } }, station: true, category: true },
     });
 
     if (menus.length !== menuIds.length) {
@@ -163,7 +178,7 @@ export class OrdersService {
     }
 
     // Calculate ETA
-    const eta = await this.calculateETA(outletId, dto.items, menus);
+    const eta = await this.computeEtaForItems(outletId, dto.items, menus);
 
     let stockChanges: Array<{ ingredientId: string; qtyDelta: number }> = [];
 
@@ -305,6 +320,11 @@ export class OrdersService {
 
     // Emit WebSocket events
     this.websocketGateway.emitTicketCreated(outletId, completeTicket!);
+    this.websocketGateway.emitStationQueueUpdated(outletId, {
+      outletId,
+      ticketId: result.id,
+      reason: 'TICKET_CREATED',
+    });
     if (stockChanges.length > 0) {
       this.websocketGateway.emitStockChanged(outletId, {
         outletId,
@@ -318,49 +338,105 @@ export class OrdersService {
     return this.buildCheckoutResult(completeTicket!);
   }
 
-  private async calculateETA(outletId: string, items: CartItem[], menus: Array<{ id: string; stationId: string; avgMakeSeconds: number }>): Promise<{ min: number; max: number }> {
-    // Get current queue load per station
-    const stationLoads = await this.prisma.subTicket.groupBy({
-      by: ['stationId'],
+  /**
+   * Remaining work (seconds) per station for all active subtickets in the
+   * outlet's open shift. Work = Σ(resolved make time × qty) over order items.
+   */
+  private async getQueueWorkByStation(outletId: string): Promise<{ work: Map<string, number>; activeCount: number }> {
+    const activeSubtickets = await this.prisma.subTicket.findMany({
       where: {
         ticket: { outletId, shift: { status: 'OPEN' } },
         status: { in: ['ORDERED', 'IN_PROGRESS'] },
       },
-      _sum: { priorityScore: true },
-      _count: true,
+      include: {
+        orderItems: { include: { menu: { include: { category: true } } } },
+      },
     });
 
-    // Get station SLA
-    const stations = await this.prisma.station.findMany({
-      where: { outletId, isActive: true },
-      select: { id: true, slaMinutes: true },
-    });
-
-    const stationSlaMap = new Map(stations.map((s: typeof stations[0]) => [s.id, s.slaMinutes]));
-
-    let maxEta = 0;
-
-    for (const item of items) {
-      const menu = menus.find((m: typeof menus[0]) => m.id === item.menuId)!;
-      const stationId = menu.stationId;
-      const slaMinutes = Number(stationSlaMap.get(stationId) ?? 15);
-
-      // Base time: avg make time * qty
-      const baseTime = menu.avgMakeSeconds * item.qty / 60; // in minutes
-
-      // Add queue load
-      const load = stationLoads.find((l: typeof stationLoads[0]) => l.stationId === stationId);
-      const queueTime = load ? load._count * 2 : 0; // Estimate 2 min per queued item
-
-      const stationEta = baseTime + queueTime + slaMinutes;
-      maxEta = Math.max(maxEta, stationEta);
+    const work = new Map<string, number>();
+    for (const subticket of activeSubtickets) {
+      let subticketWork = 0;
+      for (const orderItem of subticket.orderItems) {
+        const menu = orderItem.menu;
+        const fallback = menu.category?.defaultMakeSeconds ?? DEFAULT_MAKE_SECONDS;
+        const avg = resolveAvgMakeSeconds(menu.avgMakeSeconds, menu.makeSampleCount ?? 0, fallback);
+        subticketWork += avg * orderItem.qty;
+      }
+      work.set(subticket.stationId, (work.get(subticket.stationId) ?? 0) + subticketWork);
     }
 
-    // Add buffer (±30%)
-    const min = Math.max(1, Math.round(maxEta * 0.7));
-    const max = Math.round(maxEta * 1.3);
+    return { work, activeCount: activeSubtickets.length };
+  }
+
+  /** ETA for a prospective order (checkout / validate). */
+  async computeEtaForItems(outletId: string, items: CartItem[], menus: EtaMenu[]): Promise<{ min: number; max: number }> {
+    const { work: queueWork, activeCount } = await this.getQueueWorkByStation(outletId);
+
+    const newWork = new Map<string, number>();
+    for (const item of items) {
+      const menu = menus.find((m) => m.id === item.menuId)!;
+      const fallback = menu.category?.defaultMakeSeconds ?? DEFAULT_MAKE_SECONDS;
+      const avg = resolveAvgMakeSeconds(menu.avgMakeSeconds, menu.makeSampleCount ?? 0, fallback);
+      newWork.set(menu.stationId, (newWork.get(menu.stationId) ?? 0) + avg * item.qty);
+    }
+
+    // Only stations involved in this order affect its ETA; other stations are
+    // independent queues, so a big ticket elsewhere never blocks this one.
+    const stationEtas = [...newWork.keys()].map((stationId) =>
+      estimateStationEtaSeconds(queueWork.get(stationId) ?? 0, newWork.get(stationId) ?? 0),
+    );
+
+    // Congestion is measured over the stations involved in this order.
+    const involved = new Set(newWork.keys());
+    const activeInStations = [...queueWork.keys()]
+      .filter((stationId) => involved.has(stationId))
+      .length;
+    const { min, max } = estimateTicketEta(stationEtas, activeInStations);
 
     return { min, max };
+  }
+
+  /** Recompute and persist a ticket's ETA after its queue changes. */
+  async recalculateTicketEta(outletId: string, ticketId: string): Promise<{ ticketId: string; ticketNumber: string; etaMin: number; etaMax: number } | null> {
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: {
+        subtickets: {
+          include: {
+            orderItems: { include: { menu: { include: { category: true } } } },
+          },
+        },
+      },
+    });
+
+    if (!ticket || ticket.outletId !== outletId) return null;
+
+    const active = ticket.subtickets.filter(
+      (st: typeof ticket.subtickets[number]) => st.status === 'ORDERED' || st.status === 'IN_PROGRESS',
+    );
+
+    const workByStation = new Map<string, number>();
+    for (const subticket of active) {
+      let subticketWork = 0;
+      for (const orderItem of subticket.orderItems) {
+        const menu = orderItem.menu;
+        const fallback = menu.category?.defaultMakeSeconds ?? DEFAULT_MAKE_SECONDS;
+        const avg = resolveAvgMakeSeconds(menu.avgMakeSeconds, menu.makeSampleCount ?? 0, fallback);
+        subticketWork += avg * orderItem.qty;
+      }
+      workByStation.set(subticket.stationId, (workByStation.get(subticket.stationId) ?? 0) + subticketWork);
+    }
+
+    const { min, max } = estimateTicketEta([...workByStation.values()], active.length);
+
+    await this.prisma.ticket.update({
+      where: { id: ticketId },
+      data: { etaMin: min, etaMax: max },
+    });
+
+    const event = { ticketId, ticketNumber: ticket.ticketNumber, etaMin: min, etaMax: max };
+    this.websocketGateway.emitTicketEtaUpdated(outletId, event);
+    return event;
   }
 
   private buildCheckoutResult(ticket: any) {
@@ -412,7 +488,7 @@ export class OrdersService {
 
     const menus = await this.prisma.menu.findMany({
       where: { id: { in: items.map((i) => i.menuId) } },
-      include: { station: true },
+      include: { station: true, category: true },
     });
 
     let subtotal = 0;
@@ -422,7 +498,7 @@ export class OrdersService {
     }
 
     // Estimate ETA
-    const eta = await this.calculateETA(outletId, items, menus);
+    const eta = await this.computeEtaForItems(outletId, items, menus);
 
     return {
       valid: stockCheck.canFulfill,

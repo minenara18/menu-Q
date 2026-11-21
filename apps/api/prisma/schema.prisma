@@ -161,6 +161,8 @@ model Category {
   name        String
   displayOrder Int     @default(0)
   isActive    Boolean  @default(true)
+  // Fallback make time (seconds) used until a menu has enough real samples.
+  defaultMakeSeconds Int @default(180)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -205,6 +207,9 @@ model Menu {
   isActive        Boolean          @default(true)
   availability    MenuAvailability @default(AVAILABLE)
   avgMakeSeconds  Int              @default(180)
+  // Number of completed subtickets used to learn avgMakeSeconds.
+  // While this is < 5 the category fallback is used instead.
+  makeSampleCount Int              @default(0)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
@@ -316,6 +321,8 @@ model SubTicket {
   startedAt     DateTime?
   readyAt       DateTime?
   priorityScore Float            @default(0)
+  // Manual maker bumps; each bump lowers the effective score (higher priority).
+  priorityBump  Float            @default(0)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 

@@ -38,8 +38,8 @@ export async function seedDatabase(prisma: PrismaClient) {
   ] as const) {
     await prisma.station.upsert({ where: { outletId_code: { outletId: outlet.id, code: code as never } }, update: {}, create: { id, outletId: outlet.id, code: code as never, name, color, slaMinutes: sla } });
   }
-  const catMin = await prisma.category.upsert({ where: { outletId_name: { outletId: outlet.id, name: 'Minuman' } }, update: {}, create: { id: SEED_IDS.catMinuman, outletId: outlet.id, name: 'Minuman' } });
-  const catMak = await prisma.category.upsert({ where: { outletId_name: { outletId: outlet.id, name: 'Makanan' } }, update: {}, create: { id: SEED_IDS.catMakanan, outletId: outlet.id, name: 'Makanan' } });
+  const catMin = await prisma.category.upsert({ where: { outletId_name: { outletId: outlet.id, name: 'Minuman' } }, update: { defaultMakeSeconds: 180 }, create: { id: SEED_IDS.catMinuman, outletId: outlet.id, name: 'Minuman', defaultMakeSeconds: 180 } });
+  const catMak = await prisma.category.upsert({ where: { outletId_name: { outletId: outlet.id, name: 'Makanan' } }, update: { defaultMakeSeconds: 600 }, create: { id: SEED_IDS.catMakanan, outletId: outlet.id, name: 'Makanan', defaultMakeSeconds: 600 } });
   const bar = await prisma.station.findFirstOrThrow({ where: { outletId: outlet.id, code: 'BAR' } });
   const kit = await prisma.station.findFirstOrThrow({ where: { outletId: outlet.id, code: 'KITCHEN' } });
   const pas = await prisma.station.findFirstOrThrow({ where: { outletId: outlet.id, code: 'PASTRY' } });
