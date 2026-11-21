@@ -18,11 +18,11 @@ import { UserRole } from '@order-q/shared';
 import { z } from 'zod';
 
 const OpenShiftSchema = z.object({
-  openingCash: z.number().min(0),
+  openingCash: z.number().int().min(0),
 });
 
 const CloseShiftSchema = z.object({
-  countedCash: z.number().min(0),
+  countedCash: z.number().int().min(0),
   cashCounts: z.array(z.object({
     denomination: z.number().int().positive(),
     count: z.number().int().nonnegative(),

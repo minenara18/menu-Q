@@ -78,14 +78,15 @@ model Outlet {
   name          String
   address       String?
   phone         String?
-  taxRate       Float    @default(0.11)
-  serviceRate   Float    @default(0.05)
+  // Rates are integer basis points: 10000 = 100%, 1100 = 11%.
+  taxRate       Int      @default(1100)
+  serviceRate   Int      @default(500)
   currency      String   @default("IDR")
   timezone      String   @default("Asia/Jakarta")
   receiptHeader String?
   receiptFooter String?
   lowStockThreshold Int  @default(5)
-  varianceThreshold Float @default(10000)
+  varianceThreshold Int @default(10000)
   partialReadyPolicy String @default("WAIT_ALL") // WAIT_ALL | CALL_PER_STATION
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -136,10 +137,10 @@ model Shift {
   closedBy     String?
   openedAt     DateTime    @default(now())
   closedAt     DateTime?
-  openingCash  Float       @default(0)
-  expectedCash Float?
-  countedCash  Float?
-  variance     Float?
+  openingCash  Int       @default(0)
+  expectedCash Int?
+  countedCash  Int?
+  variance     Int?
   varianceNote String?
   status       ShiftStatus @default(OPEN)
   createdAt    DateTime    @default(now())

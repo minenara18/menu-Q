@@ -20,13 +20,14 @@ const UpdateOutletSettingsSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   address: z.string().optional(),
   phone: z.string().optional(),
-  taxRate: z.number().min(0).max(1).optional(),
-  serviceRate: z.number().min(0).max(1).optional(),
+  // Rates are basis points: 10000 = 100%, 1100 = 11%.
+  taxRate: z.number().int().min(0).max(10000).optional(),
+  serviceRate: z.number().int().min(0).max(10000).optional(),
   timezone: z.string().optional(),
   receiptHeader: z.string().optional(),
   receiptFooter: z.string().optional(),
   lowStockThreshold: z.number().int().nonnegative().optional(),
-  varianceThreshold: z.number().nonnegative().optional(),
+  varianceThreshold: z.number().int().nonnegative().optional(),
   partialReadyPolicy: z.enum(['WAIT_ALL', 'CALL_PER_STATION']).optional(),
 });
 

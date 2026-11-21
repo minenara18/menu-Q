@@ -29,7 +29,7 @@ export async function seedDatabase(prisma: PrismaClient) {
   const outlet = await prisma.outlet.upsert({
     where: { id: SEED_IDS.outlet },
     update: {},
-    create: { id: SEED_IDS.outlet, name: 'Kopi Senja Demo', taxRate: 0.11, serviceRate: 0.05, lowStockThreshold: 5, varianceThreshold: 10000, partialReadyPolicy: 'WAIT_ALL' },
+    create: { id: SEED_IDS.outlet, name: 'Kopi Senja Demo', taxRate: 1100, serviceRate: 500, lowStockThreshold: 5, varianceThreshold: 10000, partialReadyPolicy: 'WAIT_ALL' },
   });
   for (const [id, code, name, color, sla] of [
     [SEED_IDS.stationBar, 'BAR', 'Bar', '#2563EB', 10],

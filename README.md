@@ -56,6 +56,13 @@ Urutan kasir: buka shift → tambah menu ke keranjang → `POST /v1/orders/check
 Split bill: `payments` boleh lebih dari satu asalkan totalnya = total tiket (tiket tetap satu).
 Diskon tiket: opsional `{ discount: { type: 'amount' | 'percent', value } }` — divalidasi dan masuk ke total.
 
+**Uang & pembulatan.** Semua amount disimpan sebagai integer rupiah; tarif pajak/service
+sebagai integer basis point (10000 = 100%, 1100 = 11%). Tidak ada uang floating-point.
+Perhitungan tunggal ada di `apps/api/src/common/money.ts`: Urutan subtotal → pajak →
+service → diskon; tiap komponen dibulatkan ke rupiah terdekat (half-up). Diskon berlaku
+atas subtotal + pajak + service. `allocateSplit(total, n)` memakai largest-remainder
+sehingga jumlah bagian selalu persis sama dengan total.
+
 Pembatalan tiket berbayar & tutup shift dengan `|variance| > outlet.varianceThreshold` (default 10000)
 memerlukan **PIN owner** yang aktif di outlet yang sama (argon2 verify, rate-limit 5x → lockout 15 menit,
 tercatat di `audit_logs` sebagai `PIN_APPROVE` / `MANAGER_PIN_FAILED`).

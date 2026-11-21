@@ -18,6 +18,7 @@ import {
   estimateTicketEta,
   resolveAvgMakeSeconds,
 } from '../../common/queue/queue-math';
+import { applyDiscount, calcTotals } from '../../common/money';
 
 /** Minimal menu shape needed for ETA computation. */
 interface EtaMenu {
@@ -117,10 +118,10 @@ export class OrdersService {
       });
     }
 
-    // Calculate totals
+    // Calculate totals (single source of truth: common/money.ts, integer rupiah + bps)
     const outlet = await this.prisma.outlet.findUnique({ where: { id: outletId } });
-    const taxRate = outlet?.taxRate || 0.11;
-    const serviceRate = outlet?.serviceRate || 0.05;
+    const taxBps = outlet?.taxRate ?? 1100;
+    const serviceBps = outlet?.serviceRate ?? 500;
 
     let subtotal = 0;
     const orderItemsData: any[] = [];
@@ -138,29 +139,30 @@ export class OrdersService {
       });
     }
 
-    const taxAmount = Math.round(subtotal * taxRate);
-    const serviceAmount = Math.round(subtotal * serviceRate);
+    const { tax: taxAmount, service: serviceAmount } = calcTotals(subtotal, taxBps, serviceBps);
 
-    // Optional ticket-level discount (validated). applied only against subtotal+tax+service.
-    let discountAmount = 0;
+    // Validate the optional ticket-level discount; the math lives in common/money.ts.
     if (dto.discount) {
       const { type, value } = dto.discount;
       if (type === 'percent') {
         if (typeof value !== 'number' || value < 0 || value > 100) {
           throw new BadRequestException('Discount percent must be between 0 and 100');
         }
-        discountAmount = Math.round((subtotal + taxAmount + serviceAmount) * (value / 100));
       } else if (type === 'amount') {
         if (typeof value !== 'number' || value < 0) {
           throw new BadRequestException('Discount amount must be non-negative');
         }
-        discountAmount = Math.min(Math.round(value), subtotal + taxAmount + serviceAmount);
       } else {
         throw new BadRequestException('Discount type must be "amount" or "percent"');
       }
     }
 
-    const totalAmount = subtotal + taxAmount + serviceAmount - discountAmount;
+    const { discountAmount, total: totalAmount } = applyDiscount(
+      subtotal,
+      taxAmount,
+      serviceAmount,
+      dto.discount,
+    );
 
     // Validate payments
     const paymentTotal = dto.payments.reduce((sum, p) => sum + p.amount, 0);

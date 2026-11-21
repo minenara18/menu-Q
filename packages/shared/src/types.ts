@@ -35,8 +35,8 @@ export interface Outlet extends BaseEntity {
   name: string;
   address?: string;
   phone?: string;
-  taxRate: number; // e.g., 0.11 for 11%
-  serviceRate: number; // e.g., 0.05 for 5%
+  taxRate: number; // basis points, e.g. 1100 = 11%
+  serviceRate: number; // basis points, e.g. 500 = 5%
   currency: string; // IDR
   timezone: string;
   receiptHeader?: string;
