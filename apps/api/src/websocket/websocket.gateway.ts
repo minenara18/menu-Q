@@ -20,6 +20,7 @@ interface AuthenticatedSocket extends Socket {
     role: string;
     shiftId?: string;
     stationId?: string | null;
+    stationIds?: string[];
   };
 }
 
@@ -71,16 +72,25 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       }
       this.outletRooms.get(payload.outletId)!.add(client.id);
 
-      // If maker, join only the room of their assigned station
+      // Makers join the rooms of every station they are assigned to.
       if (payload.role === 'MAKER') {
-        if (payload.stationId) {
-          const station = await this.prisma.station.findUnique({ where: { id: payload.stationId }, select: { code: true } });
+        const stationIds = payload.stationIds?.length
+          ? payload.stationIds
+          : payload.stationId
+            ? [payload.stationId]
+            : [];
+        for (const stationId of stationIds) {
+          const station = await this.prisma.station.findUnique({
+            where: { id: stationId },
+            select: { code: true },
+          });
           if (station) {
             client.join(`station:${payload.outletId}:${station.code}`);
           } else {
-            this.logger.warn(`Maker ${payload.sub} has unknown stationId ${payload.stationId}`);
+            this.logger.warn(`Maker ${payload.sub} has unknown stationId ${stationId}`);
           }
-        } else {
+        }
+        if (stationIds.length === 0) {
           this.logger.warn(`Maker ${payload.sub} is not assigned to any station; joining no station room`);
         }
       }

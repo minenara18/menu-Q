@@ -57,10 +57,18 @@ export class StationsController {
     @CurrentUser('outletId') outletId: string,
     @CurrentUser('role') userRole: string,
     @CurrentUser('stationId') userStationId: string | null,
+    @CurrentUser('stationIds') userStationIds: string[] | undefined,
     @Param('id') id: string,
   ) {
-    if (userRole === UserRole.MAKER && userStationId !== id) {
-      throw new ForbiddenException('Maker hanya boleh melihat antrean stasiunnya sendiri');
+    if (userRole === UserRole.MAKER) {
+      const stationIds = userStationIds?.length
+        ? userStationIds
+        : userStationId
+          ? [userStationId]
+          : [];
+      if (!stationIds.includes(id)) {
+        throw new ForbiddenException('Maker hanya boleh melihat antrean stasiunnya sendiri');
+      }
     }
     return this.stationsService.getQueue(outletId, id);
   }

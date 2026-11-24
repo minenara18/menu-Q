@@ -22,6 +22,7 @@ export const SEED_IDS = {
   userAdi: '00000000-0000-0000-0000-000000000501',
   userBudi: '00000000-0000-0000-0000-000000000502',
   userSinta: '00000000-0000-0000-0000-000000000503',
+  userCitra: '00000000-0000-0000-0000-000000000504',
 } as const;
 
 export async function seedDatabase(prisma: PrismaClient) {
@@ -68,8 +69,31 @@ export async function seedDatabase(prisma: PrismaClient) {
   ] as const) {
     const h = await pin('123456');
     await prisma.user.upsert({ where: { outletId_name: { outletId: outlet.id, name } }, update: { pinHash: h, stationId }, create: { id, outletId: outlet.id, name, pinHash: h, role: role as never, stationId } });
+    if (stationId) {
+      await prisma.userStation.upsert({
+        where: { userId_stationId: { userId: id, stationId } },
+        update: {},
+        create: { userId: id, stationId },
+      });
+    }
   }
-  return { outlet, users: { adi: SEED_IDS.userAdi, budi: SEED_IDS.userBudi, sinta: SEED_IDS.userSinta }, menus: { kopiSusu: SEED_IDS.menuKopiSusu, mieGoreng: SEED_IDS.menuMieGoreng } };
+
+  // Multi-station maker (BAR + KITCHEN) for RBAC coverage.
+  const citraHash = await pin('123456');
+  const citra = await prisma.user.upsert({
+    where: { outletId_name: { outletId: outlet.id, name: 'Citra' } },
+    update: { pinHash: citraHash, role: 'MAKER' as never, stationId: bar.id },
+    create: { id: SEED_IDS.userCitra, outletId: outlet.id, name: 'Citra', pinHash: citraHash, role: 'MAKER' as never, stationId: bar.id },
+  });
+  await prisma.userStation.deleteMany({ where: { userId: citra.id } });
+  await prisma.userStation.createMany({
+    data: [
+      { userId: citra.id, stationId: bar.id },
+      { userId: citra.id, stationId: kit.id },
+    ],
+  });
+
+  return { outlet, users: { adi: SEED_IDS.userAdi, budi: SEED_IDS.userBudi, sinta: SEED_IDS.userSinta, citra: SEED_IDS.userCitra }, menus: { kopiSusu: SEED_IDS.menuKopiSusu, mieGoreng: SEED_IDS.menuMieGoreng } };
 }
 
 export async function resetAndSeed(prisma: PrismaClient) {

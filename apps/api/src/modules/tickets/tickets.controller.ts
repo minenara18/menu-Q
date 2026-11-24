@@ -67,6 +67,7 @@ export class TicketsController {
     @CurrentUser('sub') userId: string,
     @CurrentUser('role') userRole: string,
     @CurrentUser('stationId') userStationId: string | null,
+    @CurrentUser('stationIds') userStationIds: string[] | undefined,
     @Query('status') status?: TicketStatus,
     @Query('station') station?: StationCode,
     @Query('q') q?: string,
@@ -83,7 +84,7 @@ export class TicketsController {
       dateTo: dateTo ? new Date(dateTo) : undefined,
       limit: limit ? parseInt(limit) : 50,
       offset: offset ? parseInt(offset) : 0,
-    }, { id: userId, role: userRole, stationId: userStationId });
+    }, { id: userId, role: userRole, stationId: userStationId, stationIds: userStationIds });
   }
 
   @Get(':id')
@@ -105,10 +106,11 @@ export class TicketsController {
     @CurrentUser('sub') userId: string,
     @CurrentUser('role') userRole: string,
     @CurrentUser('stationId') userStationId: string | null,
+    @CurrentUser('stationIds') userStationIds: string[] | undefined,
     @Param('subticketId') subticketId: string,
     @Body() body: z.infer<typeof BumpPrioritySchema>,
   ) {
-    return this.ticketsService.bumpSubticket(outletId, subticketId, userId, userRole, userStationId, body.reason);
+    return this.ticketsService.bumpSubticket(outletId, subticketId, userId, userRole, userStationId, body.reason, userStationIds);
   }
 
   @Patch('subtickets/:subticketId/status')
@@ -119,10 +121,11 @@ export class TicketsController {
     @CurrentUser('sub') userId: string,
     @CurrentUser('role') userRole: string,
     @CurrentUser('stationId') userStationId: string | null,
+    @CurrentUser('stationIds') userStationIds: string[] | undefined,
     @Param('subticketId') subticketId: string,
     @Body() body: z.infer<typeof SubTicketStatusSchema>,
   ) {
-    return this.ticketsService.updateSubTicketStatus(outletId, subticketId, userId, userRole, body, userStationId);
+    return this.ticketsService.updateSubTicketStatus(outletId, subticketId, userId, userRole, body, userStationId, userStationIds);
   }
 
   @Patch(':id/status')

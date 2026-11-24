@@ -42,8 +42,7 @@ export class AuthService {
   }
 
   private stationIdsOf(user: { stationId?: string | null; stations?: Array<{ stationId: string }> }): string[] {
-    const linked = (user as { stations?: Array<{ stationId: string }> }).stations ?? [];
-    const ids = linked.map((s) => s.stationId);
+    const ids = (user.stations ?? []).map((s) => s.stationId);
     if (ids.length === 0 && user.stationId) ids.push(user.stationId);
     return ids;
   }
@@ -53,6 +52,7 @@ export class AuthService {
       where: { id: userId },
       include: {
         outlet: true,
+        stations: true,
       },
     });
 
@@ -219,6 +219,7 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
+      include: { stations: true },
     });
 
     if (!user || !user.isActive) {

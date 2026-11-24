@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Body,
   Param,
@@ -24,6 +25,7 @@ const CreateUserSchema = z.object({
   name: z.string().min(1).max(100),
   pin: z.string().length(6),
   role: z.nativeEnum(UserRole),
+  stationIds: z.array(z.string().uuid()).optional(),
 });
 
 const UpdateUserSchema = z.object({
@@ -31,6 +33,11 @@ const UpdateUserSchema = z.object({
   pin: z.string().length(6).optional(),
   role: z.nativeEnum(UserRole).optional(),
   isActive: z.boolean().optional(),
+  stationIds: z.array(z.string().uuid()).optional(),
+});
+
+const SetStationsSchema = z.object({
+  stationIds: z.array(z.string().uuid()),
 });
 
 @ApiTags('users')
@@ -71,6 +78,17 @@ export class UsersController {
     @Body() body: z.infer<typeof CreateUserSchema>,
   ) {
     return this.usersService.create(outletId, { ...body, role: body.role as UserRole, outletId });
+  }
+
+  @Put(':id/stations')
+  @Roles(UserRole.OWNER)
+  @ApiOperation({ summary: 'Replace a user’s station assignments' })
+  async setStations(
+    @CurrentUser('outletId') outletId: string,
+    @Param('id') id: string,
+    @Body() body: z.infer<typeof SetStationsSchema>,
+  ) {
+    return this.usersService.setStations(outletId, id, body.stationIds);
   }
 
   @Patch(':id')

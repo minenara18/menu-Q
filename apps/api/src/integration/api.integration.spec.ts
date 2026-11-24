@@ -789,4 +789,179 @@ describe('Order-Q API (integration, separate DB)', () => {
     expect(replay.status).toBe(200);
     expect(replay.body.ticket.id).toBe(first.body.ticket.id);
   });
+
+  it('concurrency: two-ingredient menus ordered in opposite orders do not deadlock or oversell', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+
+    const a = await prisma.ingredient.create({
+      data: { outletId: OUTLET, name: 'Bahan A', unit: 'g', currentQty: 2, minThreshold: 0 },
+    });
+    const b = await prisma.ingredient.create({
+      data: { outletId: OUTLET, name: 'Bahan B', unit: 'g', currentQty: 2, minThreshold: 0 },
+    });
+
+    const makeMenu = async (name: string, lines: Array<[string, number]>) => {
+      const menu = await prisma.menu.create({
+        data: {
+          outletId: OUTLET,
+          categoryId: SEED_IDS.catMinuman,
+          stationId: SEED_IDS.stationBar,
+          name,
+          price: 10000,
+          avgMakeSeconds: 60,
+        },
+      });
+      for (const [ingredientId, qtyPerPortion] of lines) {
+        await prisma.recipeLine.create({ data: { menuId: menu.id, ingredientId, qtyPerPortion } });
+      }
+      return menu;
+    };
+
+    // A,B vs B,A — reserveStock sorts ingredients, so both orders converge.
+    const menuAB = await makeMenu('Menu AB', [[a.id, 1], [b.id, 1]]);
+    const menuBA = await makeMenu('Menu BA', [[b.id, 1], [a.id, 1]]);
+
+    const checkout = (menuId: string) => {
+      const idem = IDEM();
+      return request(server)
+        .post('/v1/orders/checkout')
+        .set('Authorization', `Bearer ${token}`)
+        .set('Idempotency-Key', idem)
+        .send(checkoutBody([{ menuId, qty: 1 }], [{ method: 'CASH', amount: 11600 }], idem));
+    };
+
+    const results = await Promise.all([
+      checkout(menuAB.id),
+      checkout(menuBA.id),
+      checkout(menuAB.id),
+      checkout(menuBA.id),
+    ]);
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses.filter((s) => s === 200)).toHaveLength(2);
+    expect(statuses.filter((s) => s === 409)).toHaveLength(2);
+
+    const afterA = await prisma.ingredient.findUniqueOrThrow({ where: { id: a.id } });
+    const afterB = await prisma.ingredient.findUniqueOrThrow({ where: { id: b.id } });
+    expect(afterA.currentQty).toBe(0);
+    expect(afterB.currentQty).toBe(0);
+  });
+
+  it('partial-ready WAIT_ALL blocks complete until every station is READY', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+    const idem = IDEM();
+    const res = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem)
+      .send(checkoutBody(
+        [{ menuId: KOPI_SUSU, qty: 1 }, { menuId: MIE_GORENG, qty: 1 }],
+        [{ method: 'CASH', amount: 40600 }],
+        idem,
+      ));
+    expect(res.status).toBe(200);
+    const ticketId = res.body.ticket.id as string;
+    const barSub = res.body.ticket.subtickets.find((s: { stationCode: string }) => s.stationCode === 'BAR');
+    const kitchenSub = res.body.ticket.subtickets.find((s: { stationCode: string }) => s.stationCode === 'KITCHEN');
+    const maker = await login(SEED_IDS.userCitra); // BAR + KITCHEN
+
+    for (const id of [barSub.id]) {
+      await request(server).patch(`/v1/tickets/subtickets/${id}/status`).set('Authorization', `Bearer ${maker}`).send({ status: 'IN_PROGRESS' });
+      await request(server).patch(`/v1/tickets/subtickets/${id}/status`).set('Authorization', `Bearer ${maker}`).send({ status: 'READY' });
+    }
+
+    const blocked = await request(server)
+      .post(`/v1/tickets/${ticketId}/complete`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(blocked.status).toBe(400);
+
+    await request(server).patch(`/v1/tickets/subtickets/${kitchenSub.id}/status`).set('Authorization', `Bearer ${maker}`).send({ status: 'IN_PROGRESS' });
+    await request(server).patch(`/v1/tickets/subtickets/${kitchenSub.id}/status`).set('Authorization', `Bearer ${maker}`).send({ status: 'READY' });
+
+    const completed = await request(server)
+      .post(`/v1/tickets/${ticketId}/complete`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(completed.status).toBe(201);
+  });
+
+  it('partial-ready CALL_PER_STATION completes once any station is READY', async () => {
+    await prisma.outlet.update({
+      where: { id: OUTLET },
+      data: { partialReadyPolicy: 'CALL_PER_STATION' },
+    });
+
+    const { token } = await openShiftAndRelogin(ADI);
+    const idem = IDEM();
+    const res = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem)
+      .send(checkoutBody(
+        [{ menuId: KOPI_SUSU, qty: 1 }, { menuId: MIE_GORENG, qty: 1 }],
+        [{ method: 'CASH', amount: 40600 }],
+        idem,
+      ));
+    expect(res.status).toBe(200);
+    const ticketId = res.body.ticket.id as string;
+    const barSub = res.body.ticket.subtickets.find((s: { stationCode: string }) => s.stationCode === 'BAR');
+    const maker = await login(SEED_IDS.userCitra);
+
+    await request(server).patch(`/v1/tickets/subtickets/${barSub.id}/status`).set('Authorization', `Bearer ${maker}`).send({ status: 'IN_PROGRESS' });
+    await request(server).patch(`/v1/tickets/subtickets/${barSub.id}/status`).set('Authorization', `Bearer ${maker}`).send({ status: 'READY' });
+
+    const completed = await request(server)
+      .post(`/v1/tickets/${ticketId}/complete`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(completed.status).toBe(201);
+  });
+
+  it('multi-station maker sees/updates only their two stations; other station is 403', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+
+    const checkoutOne = async (menuId: string, total: number) => {
+      const idem = IDEM();
+      const res = await request(server)
+        .post('/v1/orders/checkout')
+        .set('Authorization', `Bearer ${token}`)
+        .set('Idempotency-Key', idem)
+        .send(checkoutBody([{ menuId, qty: 1 }], [{ method: 'CASH', amount: total }], idem));
+      expect(res.status).toBe(200);
+      return res;
+    };
+
+    const bar = await checkoutOne(KOPI_SUSU, 20880);
+    const kitchen = await checkoutOne(MIE_GORENG, 19720);
+    const pastry = await checkoutOne(SEED_IDS.menuCroissant, 20880);
+
+    const maker = await login(SEED_IDS.userCitra);
+
+    const list = await request(server).get('/v1/tickets').set('Authorization', `Bearer ${maker}`);
+    expect(list.status).toBe(200);
+    const numbers = list.body.tickets.map((t: { ticketNumber: string }) => t.ticketNumber);
+    expect(numbers).toContain(bar.body.ticket.ticketNumber);
+    expect(numbers).toContain(kitchen.body.ticket.ticketNumber);
+    expect(numbers).not.toContain(pastry.body.ticket.ticketNumber);
+
+    const findSub = (res: { body: { ticket: { subtickets: Array<{ stationCode: string; id: string }> } } }, code: string) =>
+      res.body.ticket.subtickets.find((s) => s.stationCode === code)!.id;
+
+    expect((await request(server).patch(`/v1/tickets/subtickets/${findSub(bar, 'BAR')}/status`).set('Authorization', `Bearer ${maker}`).send({ status: 'IN_PROGRESS' })).status).toBe(200);
+    expect((await request(server).patch(`/v1/tickets/subtickets/${findSub(kitchen, 'KITCHEN')}/status`).set('Authorization', `Bearer ${maker}`).send({ status: 'IN_PROGRESS' })).status).toBe(200);
+    expect((await request(server).patch(`/v1/tickets/subtickets/${findSub(pastry, 'PASTRY')}/status`).set('Authorization', `Bearer ${maker}`).send({ status: 'IN_PROGRESS' })).status).toBe(403);
+
+    expect((await request(server).get(`/v1/stations/${SEED_IDS.stationBar}/queue`).set('Authorization', `Bearer ${maker}`)).status).toBe(200);
+    expect((await request(server).get(`/v1/stations/${SEED_IDS.stationKitchen}/queue`).set('Authorization', `Bearer ${maker}`)).status).toBe(200);
+    expect((await request(server).get(`/v1/stations/${SEED_IDS.stationPastry}/queue`).set('Authorization', `Bearer ${maker}`)).status).toBe(403);
+
+    // Owner can replace the maker's stations via users endpoint.
+    const owner = await login(SINTA);
+    const setStations = await request(server)
+      .put(`/v1/users/${SEED_IDS.userCitra}/stations`)
+      .set('Authorization', `Bearer ${owner}`)
+      .send({ stationIds: [SEED_IDS.stationBar] });
+    expect(setStations.status).toBe(200);
+    expect(setStations.body.stations).toHaveLength(1);
+
+    const makerAfter = await login(SEED_IDS.userCitra);
+    expect((await request(server).get(`/v1/stations/${SEED_IDS.stationKitchen}/queue`).set('Authorization', `Bearer ${makerAfter}`)).status).toBe(403);
+  });
 });

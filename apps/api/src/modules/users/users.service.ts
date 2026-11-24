@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { UserRole } from '@order-q/shared';
@@ -10,6 +10,7 @@ interface CreateUserDto {
   name: string;
   pin: string;
   role: UserRole;
+  stationIds?: string[];
 }
 
 interface UpdateUserDto {
@@ -17,6 +18,7 @@ interface UpdateUserDto {
   pin?: string;
   role?: UserRole;
   isActive?: boolean;
+  stationIds?: string[];
 }
 
 @Injectable()
@@ -26,32 +28,45 @@ export class UsersService {
     private authService: AuthService,
   ) {}
 
+  /** Validate that all station IDs belong to the outlet. */
+  private async assertStations(outletId: string, stationIds?: string[]) {
+    if (!stationIds || stationIds.length === 0) return;
+    const unique = [...new Set(stationIds)];
+    const count = await this.prisma.station.count({ where: { id: { in: unique }, outletId } });
+    if (count !== unique.length) {
+      throw new BadRequestException('One or more stations not found in this outlet');
+    }
+  }
+
+  /** Replace the user's station assignments (keeps legacy stationId untouched). */
+  private async syncStations(userId: string, stationIds?: string[]) {
+    await this.prisma.userStation.deleteMany({ where: { userId } });
+    if (stationIds && stationIds.length > 0) {
+      await this.prisma.userStation.createMany({
+        data: [...new Set(stationIds)].map((stationId) => ({ userId, stationId })),
+      });
+    }
+  }
+
+  async setStations(outletId: string, userId: string, stationIds: string[]) {
+    await this.findById(outletId, userId);
+    await this.assertStations(outletId, stationIds);
+    await this.syncStations(userId, stationIds);
+    return this.findById(outletId, userId);
+  }
+
   async findAll(outletId: string) {
     return this.prisma.user.findMany({
       where: { outletId },
       orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        name: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      include: { stations: { include: { station: true } } },
     });
   }
 
   async findById(outletId: string, id: string) {
     const user = await this.prisma.user.findFirst({
       where: { id, outletId },
-      select: {
-        id: true,
-        name: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      include: { stations: { include: { station: true } } },
     });
 
     if (!user) {
@@ -73,43 +88,41 @@ export class UsersService {
 
     const pinHash = await this.authService.hashPin(dto.pin);
 
-    return this.prisma.user.create({
+    await this.assertStations(outletId, dto.stationIds);
+
+    const created = await this.prisma.user.create({
       data: {
         outletId,
         name: dto.name,
         pinHash,
         role: dto.role as unknown as PrismaUserRole,
       },
-      select: {
-        id: true,
-        name: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-      },
     });
+
+    if (dto.stationIds) {
+      await this.syncStations(created.id, dto.stationIds);
+    }
+
+    return this.findById(outletId, created.id);
   }
 
   async update(outletId: string, id: string, dto: UpdateUserDto) {
-    const user = await this.findById(outletId, id);
+    await this.findById(outletId, id);
 
-    const data: any = { ...dto };
-    if (dto.pin) {
-      data.pinHash = await this.authService.hashPin(dto.pin);
-      delete data.pin;
+    const { stationIds, pin, ...rest } = dto;
+    const data: any = { ...rest };
+    if (pin) {
+      data.pinHash = await this.authService.hashPin(pin);
+    }
+    if (stationIds) {
+      await this.assertStations(outletId, stationIds);
+      await this.syncStations(id, stationIds);
     }
 
     return this.prisma.user.update({
       where: { id },
       data,
-      select: {
-        id: true,
-        name: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      include: { stations: { include: { station: true } } },
     });
   }
 

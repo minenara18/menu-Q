@@ -118,7 +118,10 @@ model User {
   updatedAt DateTime @updatedAt
 
   outlet    Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
-  station   Station? @relation(fields: [stationId], references: [id], onDelete: SetNull)
+  // Legacy primary station, kept for compatibility during transition.
+  station   Station? @relation("UserPrimaryStation", fields: [stationId], references: [id], onDelete: SetNull)
+  // Many-to-many stations (makers may work several stations).
+  stations  UserStation[] @relation("UserStationUser")
   shiftsOpened   Shift[] @relation("ShiftOpenedBy")
   shiftsClosed   Shift[] @relation("ShiftClosedBy")
   stockMoves     StockMove[]
@@ -127,6 +130,18 @@ model User {
   @@unique([outletId, name])
   @@index([outletId])
   @@index([role])
+  @@index([stationId])
+}
+
+model UserStation {
+  userId    String
+  stationId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation("UserStationUser", fields: [userId], references: [id], onDelete: Cascade)
+  station Station @relation("UserStationStation", fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, stationId])
   @@index([stationId])
 }
 
@@ -189,7 +204,8 @@ model Station {
   outlet      Outlet       @relation(fields: [outletId], references: [id], onDelete: Cascade)
   menus       Menu[]
   subtickets  SubTicket[]
-  staff       User[]
+  staff       User[]          @relation("UserPrimaryStation")
+  userStations UserStation[]  @relation("UserStationStation")
 
   @@unique([outletId, code])
   @@index([outletId, displayOrder])

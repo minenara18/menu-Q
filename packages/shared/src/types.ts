@@ -26,6 +26,8 @@ export interface User extends BaseEntity {
   pinHash: string;
   role: UserRole;
   isActive: boolean;
+  stationId?: string | null;
+  stationIds?: string[];
 }
 
 export const UserRoleSchema = z.nativeEnum(UserRole);

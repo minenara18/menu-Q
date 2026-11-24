@@ -18,6 +18,7 @@ interface ActingUser {
   id: string;
   role: string;
   stationId?: string | null;
+  stationIds?: string[];
 }
 
 interface SubTicketStatusUpdate {
@@ -59,12 +60,17 @@ export class TicketsService {
 
     const subticketFilter: any = {};
     if (query.station) subticketFilter.station = { code: query.station };
-    // Makers only see tickets that contain work for their assigned station
+    // Makers only see tickets that contain work for any of their stations.
     if (user?.role === 'MAKER') {
-      if (!user.stationId) {
+      const stationIds = user.stationIds?.length
+        ? user.stationIds
+        : user.stationId
+          ? [user.stationId]
+          : [];
+      if (stationIds.length === 0) {
         throw new ForbiddenException('Maker is not assigned to a station');
       }
-      subticketFilter.stationId = user.stationId;
+      subticketFilter.stationId = { in: stationIds };
     }
     if (Object.keys(subticketFilter).length > 0) {
       where.subtickets = { some: subticketFilter };
@@ -178,7 +184,7 @@ export class TicketsService {
     return ticket;
   }
 
-  async updateSubTicketStatus(outletId: string, subticketId: string, userId: string, userRole: string, dto: SubTicketStatusUpdate, userStationId?: string | null) {
+  async updateSubTicketStatus(outletId: string, subticketId: string, userId: string, userRole: string, dto: SubTicketStatusUpdate, userStationId?: string | null, userStationIds?: string[]) {
     const subticket = await this.prisma.subTicket.findFirst({
       where: { id: subticketId, ticket: { outletId } },
       include: { ticket: true, station: true },
@@ -188,12 +194,17 @@ export class TicketsService {
       throw new NotFoundException('Sub-ticket not found');
     }
 
-    // Makers can only update sub-tickets for their assigned station
+    // Makers can only update sub-tickets for one of their assigned stations.
     if (userRole === 'MAKER') {
-      if (!userStationId) {
+      const stationIds = userStationIds?.length
+        ? userStationIds
+        : userStationId
+          ? [userStationId]
+          : [];
+      if (stationIds.length === 0) {
         throw new ForbiddenException('Maker is not assigned to a station');
       }
-      if (subticket.stationId !== userStationId) {
+      if (!stationIds.includes(subticket.stationId)) {
         throw new ForbiddenException('Maker hanya boleh mengupdate sub-tiket stasiunnya sendiri');
       }
     }
@@ -429,6 +440,7 @@ export class TicketsService {
     userRole: string,
     userStationId: string | null,
     reason?: string,
+    userStationIds?: string[],
   ) {
     const subticket = await this.prisma.subTicket.findFirst({
       where: { id: subticketId, ticket: { outletId } },
@@ -440,7 +452,12 @@ export class TicketsService {
     }
 
     if (userRole === 'MAKER') {
-      if (!userStationId || subticket.stationId !== userStationId) {
+      const stationIds = userStationIds?.length
+        ? userStationIds
+        : userStationId
+          ? [userStationId]
+          : [];
+      if (!stationIds.includes(subticket.stationId)) {
         throw new ForbiddenException('Maker hanya boleh mengubah sub-tiket stasiunnya sendiri');
       }
     }
