@@ -459,6 +459,7 @@ describe('Order-Q API (integration, separate DB)', () => {
     expect(live.status).toBe(200);
     expect(live.body.status).toBe('ok');
     expect(live.headers['x-content-type-options']).toBe('nosniff'); // helmet
+    expect(live.headers['x-request-id']).toBeDefined(); // structured logger
 
     const ready = await request(server).get('/health/ready');
     expect(ready.status).toBe(200);

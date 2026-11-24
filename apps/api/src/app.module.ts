@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import helmet from 'helmet';
+import { requestLoggingMiddleware } from './common/logging/request-logger.middleware';
 import appConfig from './config/app.config';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -66,7 +67,7 @@ import { HealthModule } from './modules/health/health.module';
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     // Applied as middleware (not only in main.ts) so integration tests see the
-    // same security headers as the running app.
-    consumer.apply(helmet()).forRoutes('*');
+    // same security headers and request ids as the running app.
+    consumer.apply(helmet(), requestLoggingMiddleware).forRoutes('*');
   }
 }
