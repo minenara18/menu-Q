@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: orderq
+          POSTGRES_PASSWORD: orderq_ci_password
+          POSTGRES_DB: orderq
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orderq -d orderq"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://orderq:orderq_ci_password@localhost:5432/orderq?schema=public
+      DATABASE_URL_TEST: postgresql://orderq:orderq_ci_password@localhost:5432/orderq_test?schema=public
+      JWT_SECRET: ci-only-secret-at-least-32-characters-long-000
+      QRIS_ENABLED: 'false'
+      PORT: '3000'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create isolated test database
+        run: PGPASSWORD=orderq_ci_password psql -h localhost -U orderq -d orderq -c 'CREATE DATABASE orderq_test;'
+
+      - name: Apply migrations (dev-like DB)
+        run: npx prisma migrate deploy
+        working-directory: apps/api
+
+      - name: Apply migrations (test DB)
+        run: npx prisma migrate deploy
+        working-directory: apps/api
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL_TEST }}
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: apps/api
+
+      - name: Build
+        run: npm run build:api
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test --workspace @order-q/api
+
+      - name: Integration tests
+        run: npm run test:integration --workspace @order-q/api
