@@ -13,6 +13,13 @@ import {
   nextEma,
   orderQueue,
 } from '../../common/queue/queue-math';
+import { buildReceiptData } from '../../common/receipt/receipt-data';
+import {
+  escPosBase64,
+  renderKitchenSlip,
+  renderReceiptText,
+  type PaperWidth,
+} from '../../common/receipt/receipt-renderer';
 
 interface ActingUser {
   id: string;
@@ -430,6 +437,88 @@ export class TicketsService {
     });
 
     return updated;
+  }
+
+  /** Structured receipt data + rendered text/ESC-POS, from one canonical builder. */
+  async getReceipt(outletId: string, id: string, width: PaperWidth = 32) {
+    const ticket = await this.prisma.ticket.findFirst({
+      where: { id, outletId },
+      include: {
+        shift: {
+          include: {
+            outlet: true,
+            openedByUser: { select: { id: true, name: true } },
+          },
+        },
+        orderItems: { include: { menu: true } },
+        payments: true,
+        subtickets: {
+          include: { station: true, orderItems: { include: { menu: true } } },
+        },
+      },
+    });
+
+    if (!ticket) {
+      throw new NotFoundException('Ticket not found');
+    }
+
+    const receipt = buildReceiptData(ticket);
+    const text = renderReceiptText(receipt, width);
+    const kitchenSlips = ticket.subtickets.map((subticket) => ({
+      subticketId: subticket.id,
+      stationCode: subticket.station.code,
+      lines: renderKitchenSlip(
+        {
+          ticketNumber: ticket.ticketNumber,
+          stationCode: subticket.station.code,
+          stationName: subticket.station.name,
+          at: receipt.date,
+          items: subticket.orderItems.map((oi) => ({
+            name: oi.menu.name,
+            qty: oi.qty,
+            note: oi.note,
+          })),
+        },
+        width,
+      ),
+    }));
+
+    return {
+      ticket: {
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        status: ticket.status,
+        etaMin: ticket.etaMin,
+        etaMax: ticket.etaMax,
+      },
+      receipt,
+      text,
+      escpos: escPosBase64(text),
+      kitchenSlips,
+    };
+  }
+
+  /** Reprint is audited so every extra print is attributable. */
+  async reprint(outletId: string, id: string, userId: string, width: PaperWidth = 32) {
+    const data = await this.getReceipt(outletId, id, width);
+
+    await this.prisma.auditLog.create({
+      data: {
+        outletId,
+        actorId: userId,
+        action: 'TICKET_REPRINT',
+        entity: 'Ticket',
+        entityId: id,
+        diff: { ticketNumber: data.receipt.ticketNumber, width },
+      },
+    });
+
+    return {
+      success: true,
+      ticketNumber: data.receipt.ticketNumber,
+      text: data.text,
+      escpos: data.escpos,
+    };
   }
 
   /** Manual maker bump: raises a subticket's priority and writes an audit log. */

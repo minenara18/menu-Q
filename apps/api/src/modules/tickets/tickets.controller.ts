@@ -97,6 +97,30 @@ export class TicketsController {
     return this.ticketsService.findById(outletId, id);
   }
 
+  @Get(':id/receipt')
+  @Roles(UserRole.CASHIER, UserRole.OWNER)
+  @ApiOperation({ summary: 'Get structured receipt data and rendered text/ESC-POS' })
+  async getReceipt(
+    @CurrentUser('outletId') outletId: string,
+    @Param('id') id: string,
+    @Query('width') width?: string,
+  ) {
+    return this.ticketsService.getReceipt(outletId, id, width === '48' ? 48 : 32);
+  }
+
+  @Post(':id/reprint')
+  @Roles(UserRole.CASHIER, UserRole.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reprint a receipt (audited)' })
+  async reprint(
+    @CurrentUser('outletId') outletId: string,
+    @CurrentUser('sub') userId: string,
+    @Param('id') id: string,
+    @Body() body?: { width?: number },
+  ) {
+    return this.ticketsService.reprint(outletId, id, userId, body?.width === 48 ? 48 : 32);
+  }
+
   @Post('subtickets/:subticketId/priority/bump')
   @Roles(UserRole.MAKER, UserRole.OWNER)
   @HttpCode(HttpStatus.OK)

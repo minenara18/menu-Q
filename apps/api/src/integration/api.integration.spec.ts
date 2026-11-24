@@ -964,4 +964,54 @@ describe('Order-Q API (integration, separate DB)', () => {
     const makerAfter = await login(SEED_IDS.userCitra);
     expect((await request(server).get(`/v1/stations/${SEED_IDS.stationKitchen}/queue`).set('Authorization', `Bearer ${makerAfter}`)).status).toBe(403);
   });
+
+  it('receipt: structured data, rendered text and audited reprint with RBAC', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+    const idem = IDEM();
+    const sale = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem)
+      .send(checkoutBody(
+        [{ menuId: KOPI_SUSU, qty: 1 }, { menuId: MIE_GORENG, qty: 1 }],
+        [{ method: 'CASH', amount: 10000 }, { method: 'QRIS', amount: 30600 }],
+        idem,
+      ));
+    expect(sale.status).toBe(200);
+    const ticketId = sale.body.ticket.id as string;
+
+    const receipt = await request(server)
+      .get(`/v1/tickets/${ticketId}/receipt?width=48`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(receipt.status).toBe(200);
+    expect(receipt.body.receipt.ticketNumber).toBe(sale.body.ticket.ticketNumber);
+    expect(receipt.body.receipt.cashier.name).toBe('Adi');
+    expect(receipt.body.receipt.items).toHaveLength(2);
+    expect(receipt.body.receipt.total).toBe(40600);
+    expect(receipt.body.receipt.payments).toHaveLength(2);
+    expect(receipt.body.receipt.eta.min).toBeGreaterThanOrEqual(1);
+    expect(receipt.body.text.every((line: string) => line.length === 48)).toBe(true);
+    expect(receipt.body.escpos).toMatch(/^[A-Za-z0-9+/=]+$/);
+    expect(receipt.body.kitchenSlips).toHaveLength(2);
+
+    const reprint = await request(server)
+      .post(`/v1/tickets/${ticketId}/reprint`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ width: 32 });
+    expect(reprint.status).toBe(200);
+    expect(reprint.body.ticketNumber).toBe(sale.body.ticket.ticketNumber);
+
+    const audit = await prisma.auditLog.findFirst({
+      where: { entityId: ticketId, action: 'TICKET_REPRINT' },
+    });
+    expect(audit?.actorId).toBe(ADI);
+
+    // Maker may not reprint.
+    const maker = await login(BUDI);
+    const forbidden = await request(server)
+      .post(`/v1/tickets/${ticketId}/reprint`)
+      .set('Authorization', `Bearer ${maker}`)
+      .send({});
+    expect(forbidden.status).toBe(403);
+  });
 });

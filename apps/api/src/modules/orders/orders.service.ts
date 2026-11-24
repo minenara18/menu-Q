@@ -21,6 +21,7 @@ import {
   resolveAvgMakeSeconds,
 } from '../../common/queue/queue-math';
 import { applyDiscount, calcTotals } from '../../common/money';
+import { buildReceiptData } from '../../common/receipt/receipt-data';
 
 /** Minimal menu shape needed for ETA computation. */
 interface EtaMenu {
@@ -528,10 +529,6 @@ export class OrdersService {
   }
 
   private buildCheckoutResult(ticket: any) {
-    const cashPayments = ticket.payments.filter((p: any) => p.method === PaymentMethod.CASH);
-    const cashTotal = cashPayments.reduce((sum: number, p: any) => sum + p.amount, 0);
-    const change = cashTotal > ticket.totalAmount ? cashTotal - ticket.totalAmount : 0;
-
     return {
       ticket: {
         id: ticket.id,
@@ -547,27 +544,7 @@ export class OrdersService {
           status: st.status,
         })),
       },
-      receipt: {
-        outletName: ticket.shift?.outlet?.name || 'Order-Q',
-        ticketNumber: ticket.ticketNumber,
-        items: ticket.orderItems.map((oi: any) => ({
-          name: oi.menu.name,
-          qty: oi.qty,
-          price: oi.priceSnapshot,
-          subtotal: oi.priceSnapshot * oi.qty,
-        })),
-        subtotal: ticket.subtotal,
-        taxAmount: ticket.taxAmount,
-        serviceAmount: ticket.serviceAmount,
-        discountAmount: ticket.discountAmount,
-        total: ticket.totalAmount,
-        payments: ticket.payments.map((p: any) => ({
-          method: p.method,
-          amount: p.amount,
-        })),
-        change: change > 0 ? change : undefined,
-        timestamp: ticket.createdAt.toISOString(),
-      },
+      receipt: buildReceiptData(ticket),
     };
   }
 
