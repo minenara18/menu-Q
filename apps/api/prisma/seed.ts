@@ -1,10 +1,27 @@
 import { PrismaClient } from '@prisma/client';
 import { seedDatabase } from './seed-core';
 
-const prisma = new PrismaClient();
+/** Seed must never run against production data. */
+export function assertNotProduction(): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Seed dinonaktifkan ketika NODE_ENV=production.');
+  }
+}
 
 async function main() {
-  await seedDatabase(prisma);
-  console.log('Seed OK. Demo IDs fixed. PIN demo: 123456 (Adi/Budi/Sinta).');
+  assertNotProduction();
+  const prisma = new PrismaClient();
+  try {
+    await seedDatabase(prisma);
+    console.log('Seed OK. Demo IDs fixed. PIN demo: 123456 (Adi/Budi/Sinta).');
+  } finally {
+    await prisma.$disconnect();
+  }
 }
-main().then(() => prisma.$disconnect()).catch(async (e) => { console.error(e); await prisma.$disconnect(); process.exit(1); });
+
+if (require.main === module) {
+  main().catch(async (error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

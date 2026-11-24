@@ -1,8 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { configureSwagger, shouldEnableDocs } from './config/swagger';
 
 const logger = new Logger('Bootstrap');
 
@@ -44,10 +44,17 @@ async function bootstrap() {
   const apiPrefix = configService.get<string>('app.apiPrefix') ?? 'v1';
   // Health probes are intentionally outside the versioned prefix.
   app.setGlobalPrefix(apiPrefix, { exclude: ['health', 'health/ready'] });
-  app.enableCors({
-    origin: configService.get<string>('app.socket.corsOrigin') ?? '*',
-    credentials: true,
-  });
+  const corsOrigins = (configService.get<string>('app.cors.origins') ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const corsOrigin =
+    corsOrigins.length > 0
+      ? corsOrigins
+      : nodeEnv === 'production'
+        ? false // empty allowlist in production => reject cross-origin requests
+        : '*';
+  app.enableCors({ origin: corsOrigin, credentials: true });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -58,34 +65,17 @@ async function bootstrap() {
     }),
   );
 
-  // Swagger documentation
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Order-Q API')
-    .setDescription('Queue-first POS API for F&B')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .addTag('auth', 'Authentication')
-    .addTag('shifts', 'Shift Management')
-    .addTag('menus', 'Menu Management')
-    .addTag('categories', 'Category Management')
-    .addTag('stations', 'Station Management')
-    .addTag('ingredients', 'Ingredient Management')
-    .addTag('recipes', 'Recipe/BOM Management')
-    .addTag('stock', 'Stock Management')
-    .addTag('orders', 'Order & Checkout')
-    .addTag('tickets', 'Ticket & Queue Management')
-    .addTag('payments', 'Payment Processing')
-    .addTag('settings', 'Outlet Settings')
-    .addTag('users', 'User Management')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('docs', app, document);
+  // Swagger is disabled in production unless ENABLE_DOCS=true.
+  configureSwagger(app, configService);
 
   const port = configService.get<number>('app.port') ?? 3000;
   // Bind 0.0.0.0 so the API is reachable from LAN/devices (not just localhost).
   await app.listen(port, '0.0.0.0');
   logger.log(`Order-Q API running on http://localhost:${port}/${apiPrefix}`);
-  logger.log(`Swagger docs at http://localhost:${port}/docs`);
+  const docsEnabled = shouldEnableDocs(
+    nodeEnv,
+    configService.get<boolean>('app.docs.enabled') === true,
+  );
+  logger.log(`Swagger docs ${docsEnabled ? `at http://localhost:${port}/docs` : 'disabled'}`);
 }
 bootstrap();

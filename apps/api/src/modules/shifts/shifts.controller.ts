@@ -7,8 +7,10 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Request } from 'express';
 import { ShiftsService } from './shifts.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -85,10 +87,10 @@ export class ShiftsController {
     @CurrentUser('outletId') outletId: string,
     @CurrentUser('sub') userId: string,
     @Param('id') id: string,
+    @Req() req: Request,
     @Body() body: z.infer<typeof CloseShiftSchema>,
   ) {
-    // For now, we'll skip manager PIN verification in the controller
-    // The service will handle the threshold check
-    return this.shiftsService.close(outletId, id, userId, body);
+    // The service handles the threshold check and manager-PIN verification.
+    return this.shiftsService.close(outletId, id, userId, body, req.ip);
   }
 }

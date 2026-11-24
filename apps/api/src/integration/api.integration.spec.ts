@@ -19,6 +19,7 @@ process.env.DATABASE_URL = testUrl;
 
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { PaymentsGateway } from '../modules/payments/payments.gateway';
@@ -27,6 +28,7 @@ import { ThrottlerStorage } from '@nestjs/throttler';
 import { ManagerPinService } from '../modules/auth/manager-pin.service';
 import { XenditPaymentGateway } from '../modules/payments/xendit-payment.gateway';
 import { AppModule } from '../app.module';
+import { PrismaService } from '../prisma/prisma.service';
 import { resetAndSeed, SEED_IDS } from '../../prisma/seed-core';
 import { createHmac } from 'crypto';
 
@@ -66,9 +68,10 @@ describe('Order-Q API (integration, separate DB)', () => {
 
   beforeEach(async () => {
     await resetAndSeed(prisma);
-    // Clear in-memory manager-PIN lockout state between tests
-    const managerPin = app.get(ManagerPinService) as unknown as { attempts: Map<string, unknown> };
-    managerPin.attempts?.clear();
+    // Security state is now persisted; clear the tables between tests.
+    await prisma.pinAttempt.deleteMany({});
+    await prisma.refreshToken.deleteMany({});
+    await prisma.idempotencyKey.deleteMany({});
     // Clear in-memory throttler state so rate-limit tests are deterministic.
     const storage = app.get(ThrottlerStorage) as unknown as {
       storage: Record<string, unknown>;
@@ -455,6 +458,7 @@ describe('Order-Q API (integration, separate DB)', () => {
     const live = await request(server).get('/health');
     expect(live.status).toBe(200);
     expect(live.body.status).toBe('ok');
+    expect(live.headers['x-content-type-options']).toBe('nosniff'); // helmet
 
     const ready = await request(server).get('/health/ready');
     expect(ready.status).toBe(200);
@@ -639,5 +643,150 @@ describe('Order-Q API (integration, separate DB)', () => {
       .get(`/v1/stations/${SEED_IDS.stationKitchen}/queue`)
       .set('Authorization', `Bearer ${makerToken}`);
     expect(forbidden.status).toBe(403);
+  });
+
+  it('manager PIN lockout is persistent (survives a new service instance)', async () => {
+    const { token, shiftId } = await openShiftAndRelogin(ADI);
+
+    for (let i = 0; i < 5; i++) {
+      const res = await request(server)
+        .post(`/v1/shifts/${shiftId}/close`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ countedCash: 150000, cashCounts: [], managerPin: '000000' });
+      expect(res.status).toBe(403);
+    }
+
+    const row = await prisma.pinAttempt.findFirstOrThrow({
+      where: { kind: 'MANAGER', outletId: OUTLET },
+    });
+    expect(row.attempts).toBe(5);
+    expect(row.lockLevel).toBe(1);
+    expect(row.lockedUntil).not.toBeNull();
+
+    // Simulated restart: a fresh service instance reads the same database state.
+    const fresh = new ManagerPinService(app.get(PrismaService), app.get(ConfigService));
+    await expect(
+      fresh.verify(OUTLET, '123456', {
+        action: 'CLOSE_SHIFT_VARIANCE',
+        entity: 'Shift',
+        entityId: shiftId,
+        actorId: ADI,
+      }),
+    ).rejects.toThrow(/Coba lagi/);
+  });
+
+  it('login PIN lockout is per user+IP, persistent and staggered', async () => {
+    // Clear the HTTP rate limiter between attempts so this test exercises only
+    // the persistent login-lockout state.
+    const storage = app.get(ThrottlerStorage) as unknown as {
+      storage: Record<string, unknown>;
+      timeoutIds: NodeJS.Timeout[];
+    };
+    const clearThrottle = () => {
+      for (const key of Object.keys(storage.storage)) delete storage.storage[key];
+      storage.timeoutIds.forEach(clearTimeout);
+      storage.timeoutIds = [];
+    };
+    const attempt = async (pin: string) => {
+      clearThrottle();
+      return request(server)
+        .post('/v1/auth/pin-login')
+        .send({ outletId: OUTLET, userId: ADI, pin });
+    };
+
+    for (let i = 0; i < 5; i++) {
+      expect((await attempt('000000')).status).toBe(401);
+    }
+    // The 5th failure locked this user+IP for the short period.
+    expect((await attempt('123456')).status).toBe(401);
+
+    const row = await prisma.pinAttempt.findFirstOrThrow({
+      where: { kind: 'LOGIN', outletId: OUTLET, userId: ADI },
+    });
+    expect(row.attempts).toBe(5);
+    expect(row.lockLevel).toBe(1);
+    expect(row.lockedUntil).not.toBeNull();
+
+    // Expire the short lock and fail again -> long lock (level 2).
+    await prisma.pinAttempt.update({
+      where: { id: row.id },
+      data: { lockedUntil: new Date(Date.now() - 1000) },
+    });
+    expect((await attempt('000000')).status).toBe(401);
+    const after = await prisma.pinAttempt.findUniqueOrThrow({ where: { id: row.id } });
+    expect(after.lockLevel).toBe(2);
+  });
+
+  it('refresh token: rotation, stored hash, reuse rejection and family revocation', async () => {
+    const login = await request(server)
+      .post('/v1/auth/pin-login')
+      .send({ outletId: OUTLET, userId: ADI, pin: '123456' });
+    expect(login.status).toBe(200);
+    const first = login.body.refreshToken as string;
+
+    const rows = await prisma.refreshToken.findMany({ where: { userId: ADI } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].tokenHash).not.toBe(first);
+    expect(rows[0].tokenHash).toMatch(/^[a-f0-9]{64}$/);
+
+    const rotated = await request(server).post('/v1/auth/refresh').send({ refreshToken: first });
+    expect(rotated.status).toBe(200);
+    const second = rotated.body.refreshToken as string;
+    expect(second).not.toBe(first);
+
+    // Reusing the first token is rejected and revokes the whole family.
+    const reuse = await request(server).post('/v1/auth/refresh').send({ refreshToken: first });
+    expect(reuse.status).toBe(401);
+
+    const after = await request(server).post('/v1/auth/refresh').send({ refreshToken: second });
+    expect(after.status).toBe(401);
+
+    const revoked = await prisma.refreshToken.count({
+      where: { userId: ADI, revokedAt: { not: null } },
+    });
+    expect(revoked).toBeGreaterThanOrEqual(2);
+  });
+
+  it('logout revokes the refresh-token family', async () => {
+    const login = await request(server)
+      .post('/v1/auth/pin-login')
+      .send({ outletId: OUTLET, userId: ADI, pin: '123456' });
+    expect(login.status).toBe(200);
+    const token = login.body.refreshToken as string;
+
+    const logout = await request(server).post('/v1/auth/logout').send({ refreshToken: token });
+    expect(logout.status).toBe(200);
+
+    const refresh = await request(server).post('/v1/auth/refresh').send({ refreshToken: token });
+    expect(refresh.status).toBe(401);
+  });
+
+  it('idempotency: same key + same body returns the original ticket; different body → 422', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+    const idem = IDEM();
+    const body1 = checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem);
+
+    const first = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem)
+      .send(body1);
+    expect(first.status).toBe(200);
+
+    const different = checkoutBody([{ menuId: KOPI_SUSU, qty: 2 }], [{ method: 'CASH', amount: 41760 }], idem);
+    const conflict = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem)
+      .send(different);
+    expect(conflict.status).toBe(422);
+
+    const replay = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem)
+      .send(body1);
+    expect(replay.status).toBe(200);
+    expect(replay.body.ticket.id).toBe(first.body.ticket.id);
   });
 });

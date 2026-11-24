@@ -9,8 +9,10 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { Request } from 'express';
 import { TicketsService } from './tickets.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -154,8 +156,9 @@ export class TicketsController {
     @CurrentUser('outletId') outletId: string,
     @CurrentUser('sub') userId: string,
     @Param('id') id: string,
+    @Req() req: Request,
     @Body() body: z.infer<typeof CancelTicketSchema>,
   ) {
-    return this.ticketsService.cancelTicket(outletId, id, userId, body);
+    return this.ticketsService.cancelTicket(outletId, id, userId, body, { ip: req.ip });
   }
 }

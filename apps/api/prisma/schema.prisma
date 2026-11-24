@@ -408,6 +408,50 @@ model AuditLog {
   @@index([actorId])
 }
 
+model PinAttempt {
+  id            String    @id @default(uuid())
+  outletId      String
+  // MANAGER (userId = "") atau LOGIN (userId = user id)
+  kind          String
+  userId        String    @default("")
+  ip            String    @default("")
+  attempts      Int       @default(0)
+  lockLevel     Int       @default(0) // 0 = none, 1 = short lock, 2 = long lock
+  lockedUntil   DateTime?
+  lastAttemptAt DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([kind, outletId, userId, ip])
+  @@index([outletId])
+}
+
+model RefreshToken {
+  id             String    @id @default(uuid())
+  userId         String
+  tokenHash      String    @unique
+  familyId       String
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  replacedByHash String?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model IdempotencyKey {
+  id          String   @id @default(uuid())
+  outletId    String
+  key         String
+  requestHash String
+  ticketId    String?
+  createdAt   DateTime @default(now())
+
+  @@unique([outletId, key])
+  @@index([ticketId])
+}
+
 model DeviceOutbox {
   id          String   @id @default(uuid())
   outletId    String

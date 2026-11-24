@@ -15,7 +15,15 @@ export default registerAs('app', () => ({
   },
   pin: {
     maxAttempts: parseInt(process.env.PIN_MAX_ATTEMPTS || '5', 10),
+    shortLockMinutes: parseInt(process.env.PIN_SHORT_LOCK_MINUTES || '1', 10),
     lockoutMinutes: parseInt(process.env.PIN_LOCKOUT_MINUTES || '15', 10),
+  },
+  cors: {
+    // Comma-separated allowlist. Empty in production means no cross-origin access.
+    origins: process.env.CORS_ORIGINS || '',
+  },
+  docs: {
+    enabled: process.env.ENABLE_DOCS === 'true',
   },
   printer: {
     enabled: process.env.PRINTER_ENABLED === 'true',

@@ -137,7 +137,7 @@ export class ShiftsService {
     };
   }
 
-  async close(outletId: string, shiftId: string, userId: string, dto: CloseShiftDto) {
+  async close(outletId: string, shiftId: string, userId: string, dto: CloseShiftDto, ip = '') {
     const shift = await this.findById(outletId, shiftId);
 
     if ((shift.status as ShiftStatus) === ShiftStatus.CLOSED) {
@@ -194,7 +194,7 @@ export class ShiftsService {
         entity: 'Shift',
         entityId: shiftId,
         actorId: userId,
-      });
+      }, ip);
     }
 
     // Save cash counts

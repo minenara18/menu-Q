@@ -340,7 +340,7 @@ export class TicketsService {
     return this.updateTicketStatus(outletId, ticketId, userId, { status: TicketStatus.COMPLETED });
   }
 
-  async cancelTicket(outletId: string, ticketId: string, userId: string, dto: CancelTicketDto, opts?: { system?: boolean }) {
+  async cancelTicket(outletId: string, ticketId: string, userId: string, dto: CancelTicketDto, opts?: { system?: boolean; ip?: string }) {
     const ticket = await this.findById(outletId, ticketId);
 
     if ((ticket.status as TicketStatus) === TicketStatus.CANCELLED) {
@@ -359,7 +359,7 @@ export class TicketsService {
         entity: 'Ticket',
         entityId: ticketId,
         actorId: userId,
-      });
+      }, opts?.ip ?? '');
     }
 
     // Release stock if ticket was ordered

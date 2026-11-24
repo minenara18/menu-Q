@@ -4,7 +4,9 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StockService } from '../stock/stock.service';
 import { MenusService } from '../menus/menus.service';
@@ -72,13 +74,41 @@ export class OrdersService {
       throw new BadRequestException('No active shift in token. Open a shift and sign in again.');
     }
 
-    // Check idempotency: the Idempotency-Key header is stored on the first payment row.
+    const requestHash = this.hashRequest(dto);
+
+    // Per-outlet idempotency record carrying a hash of the request body.
+    const existingKey = await this.prisma.idempotencyKey.findUnique({
+      where: { outletId_key: { outletId, key: dto.idempotencyKey } },
+    });
+
+    if (existingKey) {
+      if (existingKey.requestHash !== requestHash) {
+        throw new UnprocessableEntityException(
+          'Idempotency-Key sudah dipakai dengan isi request yang berbeda',
+        );
+      }
+      if (existingKey.ticketId) {
+        const existingTicket = await this.prisma.ticket.findFirst({
+          where: { id: existingKey.ticketId, outletId },
+          include: {
+            subtickets: { include: { station: true } },
+            orderItems: { include: { menu: true } },
+            payments: true,
+          },
+        });
+        if (existingTicket) {
+          return this.buildCheckoutResult(existingTicket);
+        }
+      }
+    }
+
+    // Legacy support: keys created before the IdempotencyKey table existed are
+    // still found on the first payment row. Checked only when no new record exists.
     const existingPayment = await this.prisma.payment.findUnique({
       where: { idempotencyKey: dto.idempotencyKey },
     });
 
     if (existingPayment) {
-      // Return existing ticket if found
       const existingTicket = await this.prisma.ticket.findUnique({
         where: { id: existingPayment.ticketId },
         include: {
@@ -188,6 +218,15 @@ export class OrdersService {
       // Serialize checkouts per shift so dailyNo allocation is race-free
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${outletId} || ':' || ${shiftId}))`;
 
+      // Claim the idempotency key inside the transaction (unique per outlet).
+      await tx.idempotencyKey.create({
+        data: {
+          outletId,
+          key: dto.idempotencyKey,
+          requestHash,
+        },
+      });
+
       // Generate ticket number atomically inside the transaction
       const lastTicket = await tx.ticket.findFirst({
         where: { shiftId },
@@ -216,6 +255,12 @@ export class OrdersService {
           discountAmount,
           totalAmount,
         },
+      });
+
+      // Link the claimed idempotency key to the created ticket.
+      await tx.idempotencyKey.update({
+        where: { outletId_key: { outletId, key: dto.idempotencyKey } },
+        data: { ticketId: ticket.id },
       });
 
       // Group items by station for subtickets
@@ -283,7 +328,31 @@ export class OrdersService {
       result = await runCheckout();
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        // Idempotency race: another identical checkout may have committed first.
+        // Check the new per-outlet key first so a different body yields 422.
+        const existingKey = await this.prisma.idempotencyKey.findUnique({
+          where: { outletId_key: { outletId, key: dto.idempotencyKey } },
+        });
+        if (existingKey) {
+          if (existingKey.requestHash !== requestHash) {
+            throw new UnprocessableEntityException(
+              'Idempotency-Key sudah dipakai dengan isi request yang berbeda',
+            );
+          }
+          if (existingKey.ticketId) {
+            const existingTicket = await this.prisma.ticket.findFirst({
+              where: { id: existingKey.ticketId, outletId },
+              include: {
+                subtickets: { include: { station: true } },
+                orderItems: { include: { menu: true } },
+                payments: true,
+              },
+            });
+            if (existingTicket) {
+              return this.buildCheckoutResult(existingTicket);
+            }
+          }
+        }
+        // Legacy key from before the IdempotencyKey table existed.
         const existingPayment = await this.prisma.payment.findUnique({
           where: { idempotencyKey: dto.idempotencyKey },
         });
@@ -439,6 +508,23 @@ export class OrdersService {
     const event = { ticketId, ticketNumber: ticket.ticketNumber, etaMin: min, etaMax: max };
     this.websocketGateway.emitTicketEtaUpdated(outletId, event);
     return event;
+  }
+
+  /** Deterministic hash of the checkout payload (excluding the key itself). */
+  private hashRequest(dto: CheckoutDto): string {
+    const canonical = {
+      items: dto.items.map((i) => ({ menuId: i.menuId, qty: i.qty, note: i.note ?? null })),
+      customerName: dto.customerName ?? null,
+      orderType: dto.orderType,
+      tableNumber: dto.tableNumber ?? null,
+      payments: dto.payments.map((p) => ({
+        method: p.method,
+        amount: p.amount,
+        splitGroupId: p.splitGroupId ?? null,
+      })),
+      discount: dto.discount ?? null,
+    };
+    return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
   }
 
   private buildCheckoutResult(ticket: any) {

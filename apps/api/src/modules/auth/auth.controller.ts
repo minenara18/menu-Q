@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -31,9 +32,10 @@ export class AuthController {
     },
   })
   async pinLogin(
+    @Req() req: Request,
     @Body() body: { outletId: string; userId: string; pin: string },
   ) {
-    return this.authService.login(body.outletId, body.userId, body.pin);
+    return this.authService.login(body.outletId, body.userId, body.pin, req.ip);
   }
 
   @Post('refresh')
@@ -41,6 +43,13 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh access token' })
   async refresh(@Body() body: { refreshToken: string }) {
     return this.authService.refreshToken(body.refreshToken);
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Logout: revoke the refresh-token family' })
+  async logout(@Body() body: { refreshToken: string }) {
+    return this.authService.logout(body.refreshToken);
   }
 
   @Get('me')
