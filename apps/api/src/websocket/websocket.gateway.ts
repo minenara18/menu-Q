@@ -58,8 +58,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       });
 
       client.user = payload;
-      client.join(`outlet:${payload.outletId}`);
-      client.join(`user:${payload.sub}`);
+      void client.join(`outlet:${payload.outletId}`)
+      void client.join(`user:${payload.sub}`)
 
       // Track for cleanup
       if (!this.userSockets.has(payload.sub)) {
@@ -85,7 +85,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
             select: { code: true },
           });
           if (station) {
-            client.join(`station:${payload.outletId}:${station.code}`);
+            void client.join(`station:${payload.outletId}:${station.code}`)
           } else {
             this.logger.warn(`Maker ${payload.sub} has unknown stationId ${stationId}`);
           }
@@ -131,7 +131,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   ) {
     if (!client.user) return { success: false, error: 'Not authenticated' };
 
-    client.join(`station:${client.user.outletId}:${data.stationCode}`);
+    void client.join(`station:${client.user.outletId}:${data.stationCode}`)
     return { success: true };
   }
 
@@ -142,7 +142,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   ) {
     if (!client.user) return { success: false, error: 'Not authenticated' };
 
-    client.leave(`station:${client.user.outletId}:${data.stationCode}`);
+    void client.leave(`station:${client.user.outletId}:${data.stationCode}`)
     return { success: true };
   }
 

@@ -78,4 +78,4 @@ async function bootstrap() {
   );
   logger.log(`Swagger docs ${docsEnabled ? `at http://localhost:${port}/docs` : 'disabled'}`);
 }
-bootstrap();
+void bootstrap();
