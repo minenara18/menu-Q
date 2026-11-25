@@ -5,10 +5,13 @@
  * integer basis points (10000 = 100%, 1100 = 11%). No floating-point money and
  * no Prisma Decimal is used anywhere on the server.
  *
- * Rounding rule: every component is rounded to the nearest rupiah, halves up.
- * Order of computation: subtotal → tax → service → discount. The discount is
- * applied against subtotal + tax + service (the amount actually charged), which
- * preserves the historical totals used by the POS.
+ * Rounding rule (order matters): DISCOUNT → SERVICE → TAX.
+ *   1. discount  = roundHalfUp(subtotal × percent)  (amount discounts are capped at subtotal)
+ *   2. basis     = subtotal - discount
+ *   3. service   = roundHalfUp(basis × serviceBps / 10000)
+ *   4. tax       = roundHalfUp((basis + service) × taxBps / 10000)
+ *   5. total     = basis + service + tax
+ * Every component is rounded to the nearest rupiah, halves rounded up.
  */
 
 /** Round to the nearest integer, halves rounded up. */
@@ -17,44 +20,44 @@ export function roundHalfUp(value: number): number {
   return Math.floor(value + 0.5);
 }
 
-/**
- * Tax and service from basis-point rates.
- * taxBps = 1100 means 11%; serviceBps = 500 means 5%.
- */
-export function calcTotals(subtotal: number, taxBps: number, serviceBps: number) {
-  const tax = roundHalfUp((subtotal * taxBps) / 10000);
-  const service = roundHalfUp((subtotal * serviceBps) / 10000);
-  return { tax, service, total: subtotal + tax + service };
-}
-
 export interface DiscountInput {
   type: 'amount' | 'percent';
   value: number;
 }
 
-/**
- * Apply a ticket-level discount against subtotal + tax + service.
- * Percent discounts are rounded half-up; amount discounts are capped at the
- * chargeable base. Callers validate the discount range before calling.
- */
+/** Apply a ticket-level discount against the subtotal. */
 export function applyDiscount(
   subtotal: number,
-  taxAmount: number,
-  serviceAmount: number,
   discount?: DiscountInput,
-): { discountAmount: number; total: number } {
-  const base = subtotal + taxAmount + serviceAmount;
-
+): { discountAmount: number; afterDiscount: number } {
   let discountAmount = 0;
   if (discount) {
     if (discount.type === 'percent') {
-      discountAmount = roundHalfUp((base * discount.value) / 100);
+      discountAmount = roundHalfUp((subtotal * discount.value) / 100);
     } else {
-      discountAmount = Math.min(roundHalfUp(discount.value), base);
+      discountAmount = Math.min(roundHalfUp(discount.value), subtotal);
     }
   }
+  return { discountAmount, afterDiscount: subtotal - discountAmount };
+}
 
-  return { discountAmount, total: base - discountAmount };
+/** Compute discount, service, tax and total in the documented order. */
+export function calcTotals(
+  subtotal: number,
+  taxBps: number,
+  serviceBps: number,
+  discount?: DiscountInput,
+) {
+  const { discountAmount, afterDiscount } = applyDiscount(subtotal, discount);
+  const service = roundHalfUp((afterDiscount * serviceBps) / 10000);
+  const tax = roundHalfUp(((afterDiscount + service) * taxBps) / 10000);
+  return {
+    discountAmount,
+    afterDiscount,
+    service,
+    tax,
+    total: afterDiscount + service + tax,
+  };
 }
 
 export function maxPortion(qty: number, per: number) {

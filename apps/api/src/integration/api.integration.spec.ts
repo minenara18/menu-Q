@@ -115,7 +115,7 @@ describe('Order-Q API (integration, separate DB)', () => {
         .post('/v1/orders/checkout')
         .set('Authorization', `Bearer ${token}`)
         .set('Idempotency-Key', idem)
-        .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem));
+        .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], idem));
     };
 
     const results = await Promise.all([doCheckout(), doCheckout(), doCheckout(), doCheckout(), doCheckout()]);
@@ -135,7 +135,7 @@ describe('Order-Q API (integration, separate DB)', () => {
   it('idempotency: same Idempotency-Key twice → one ticket; QRIS webhook twice → one effect', async () => {
     const { token } = await openShiftAndRelogin(ADI);
     const idem = IDEM();
-    const body = checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem);
+    const body = checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], idem);
 
     const [r1, r2] = await Promise.all([
       request(server).post('/v1/orders/checkout').set('Authorization', `Bearer ${token}`).set('Idempotency-Key', idem).send(body),
@@ -153,7 +153,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
       .set('Idempotency-Key', idem2)
-      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'QRIS', amount: 20880 }], idem2));
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'QRIS', amount: 20979 }], idem2));
     expect(qr.status).toBe(200);
     const qrisTicketId = qr.body.ticket.id as string;
 
@@ -182,7 +182,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
       .set('Idempotency-Key', idem)
-      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'QRIS', amount: 20880 }], idem));
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'QRIS', amount: 20979 }], idem));
     expect(qr.status).toBe(200);
     const ticketId = qr.body.ticket.id as string;
 
@@ -219,17 +219,17 @@ describe('Order-Q API (integration, separate DB)', () => {
         [{ menuId: KOPI_SUSU, qty: 1 }],
         [
           { method: 'CASH', amount: 10000 },
-          { method: 'QRIS', amount: 10880 },
+          { method: 'QRIS', amount: 10979 },
         ],
         idem,
       ));
     expect(res.status).toBe(200);
-    expect(res.body.ticket.totalAmount).toBe(20880);
+    expect(res.body.ticket.totalAmount).toBe(20979);
 
     const ticketId = res.body.ticket.id as string;
     const payments = await prisma.payment.findMany({ where: { ticketId } });
     expect(payments).toHaveLength(2);
-    expect(payments.reduce((s, p) => s + p.amount, 0)).toBe(20880);
+    expect(payments.reduce((s, p) => s + p.amount, 0)).toBe(20979);
     expect(payments.find((p) => p.method === 'CASH')?.status).toBe('PAID');
     expect(payments.find((p) => p.method === 'QRIS')?.status).toBe('PENDING');
   });
@@ -241,39 +241,39 @@ describe('Order-Q API (integration, separate DB)', () => {
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
       .set('Idempotency-Key', idem)
-      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem));
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], idem));
     expect(sale.status).toBe(200);
 
     const summary = await request(server).get(`/v1/shifts/${shiftId}/summary`).set('Authorization', `Bearer ${token}`);
     expect(summary.status).toBe(200);
-    expect(summary.body.shift.expectedCash).toBe(100000 + 20880);
+    expect(summary.body.shift.expectedCash).toBe(100000 + 20979);
 
     // Close above threshold without manager PIN -> 400
     const noPin = await request(server)
       .post(`/v1/shifts/${shiftId}/close`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ countedCash: 100000 + 20880 + 20000, cashCounts: [], forceClose: true });
+      .send({ countedCash: 100000 + 20979 + 20000, cashCounts: [], forceClose: true });
     expect(noPin.status).toBe(400);
 
     // Wrong manager PIN -> 403
     const wrongPin = await request(server)
       .post(`/v1/shifts/${shiftId}/close`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ countedCash: 100000 + 20880 + 20000, cashCounts: [], managerPin: '000000', forceClose: true });
+      .send({ countedCash: 100000 + 20979 + 20000, cashCounts: [], managerPin: '000000', forceClose: true });
     expect(wrongPin.status).toBe(403);
 
     // Open ticket blocks close without forceClose -> 400
     const openBlock = await request(server)
       .post(`/v1/shifts/${shiftId}/close`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ countedCash: 100000 + 20880, cashCounts: [], forceClose: false });
+      .send({ countedCash: 100000 + 20979, cashCounts: [], forceClose: false });
     expect(openBlock.status).toBe(400);
 
     // forceClose closes despite the ORDERED ticket
     const forced = await request(server)
       .post(`/v1/shifts/${shiftId}/close`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ countedCash: 100000 + 20880, cashCounts: [], forceClose: true });
+      .send({ countedCash: 100000 + 20979, cashCounts: [], forceClose: true });
     expect(forced.status).toBe(200);
     expect(forced.body.status).toBe('CLOSED');
 
@@ -281,7 +281,7 @@ describe('Order-Q API (integration, separate DB)', () => {
     const again = await request(server)
       .post(`/v1/shifts/${shiftId}/close`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ countedCash: 100000 + 20880, cashCounts: [], forceClose: true });
+      .send({ countedCash: 100000 + 20979, cashCounts: [], forceClose: true });
     expect(again.status).toBe(400);
   });
 
@@ -350,8 +350,8 @@ describe('Order-Q API (integration, separate DB)', () => {
         .set('Idempotency-Key', idem)
         .send(checkoutBody([{ menuId, qty: 1 }], [{ method: 'CASH', amount: total }], idem));
     };
-    const barSale = await mk(KOPI_SUSU, 20880);
-    const kitchenSale = await mk(MIE_GORENG, 19720); // 17000 + 1870 tax + 850 service
+    const barSale = await mk(KOPI_SUSU, 20979);
+    const kitchenSale = await mk(MIE_GORENG, 19814); // 17000 + 850 service + 1964 tax (tax on subtotal+service)
     expect(barSale.status).toBe(200);
     expect(kitchenSale.status).toBe(200);
 
@@ -387,11 +387,11 @@ describe('Order-Q API (integration, separate DB)', () => {
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
       .set('Idempotency-Key', idem)
-      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 18792 }], idem, { type: 'percent', value: 10 }));
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 18881 }], idem, { type: 'percent', value: 10 }));
     expect(res.status).toBe(200);
-    // subtotal 18000 + tax 1980 + service 900 = 20880; 10% discount = 2088 → 18792
-    expect(res.body.ticket.totalAmount).toBe(18792);
-    expect(res.body.receipt.discountAmount).toBe(2088);
+    // subtotal 18000; 10% discount = 1800; service 5% of 16200 = 810; tax 11% of 17010 = 1871; total 18881
+    expect(res.body.ticket.totalAmount).toBe(18881);
+    expect(res.body.receipt.discountAmount).toBe(1800);
 
     // Payment total must equal the discounted total
     const bad = IDEM();
@@ -399,7 +399,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
       .set('Idempotency-Key', bad)
-      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], bad, { type: 'percent', value: 10 }));
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], bad, { type: 'percent', value: 10 }));
     expect(badRes.status).toBe(400);
 
     // Invalid discount percent rejected
@@ -408,14 +408,14 @@ describe('Order-Q API (integration, separate DB)', () => {
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
       .set('Idempotency-Key', invalid)
-      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 18792 }], invalid, { type: 'percent', value: 150 }));
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 18881 }], invalid, { type: 'percent', value: 150 }));
     expect(invalidRes.status).toBe(400);
   });
 
   it('split + discount combined: percent discount applied across the ticket, payments match', async () => {
     const { token } = await openShiftAndRelogin(ADI);
     const idem = IDEM();
-    const total = 18792; // 20880 - 10%
+    const total = 18881; // diskon -> service -> pajak
     const res = await request(server)
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
@@ -424,7 +424,7 @@ describe('Order-Q API (integration, separate DB)', () => {
         [{ menuId: KOPI_SUSU, qty: 1 }],
         [
           { method: 'CASH', amount: 10000 },
-          { method: 'QRIS', amount: 8792 },
+          { method: 'QRIS', amount: 8881 },
         ],
         idem,
         { type: 'percent', value: 10 },
@@ -486,7 +486,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
       .set('Idempotency-Key', idem)
-      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'QRIS', amount: 20880 }], idem));
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'QRIS', amount: 20979 }], idem));
     expect(qr.status).toBe(200);
     const ticketId = qr.body.ticket.id as string;
 
@@ -515,7 +515,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
       .set('Idempotency-Key', idem)
-      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem));
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], idem));
     expect(res.status).toBe(200);
     expect(res.body.ticket.etaMin).toBeGreaterThanOrEqual(1);
     expect(res.body.ticket.etaMax).toBeGreaterThanOrEqual(res.body.ticket.etaMin);
@@ -536,7 +536,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
       .set('Idempotency-Key', idem)
-      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem));
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], idem));
     expect(res.status).toBe(200);
     const barSub = res.body.ticket.subtickets.find((s: { stationCode: string }) => s.stationCode === 'BAR');
     const makerToken = await login(BUDI);
@@ -577,7 +577,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
       .set('Idempotency-Key', idem)
-      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem));
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], idem));
     expect(res.status).toBe(200);
     const barSub = res.body.ticket.subtickets.find((s: { stationCode: string }) => s.stationCode === 'BAR');
     const makerToken = await login(BUDI);
@@ -607,7 +607,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
       .set('Idempotency-Key', idem2)
-      .send(checkoutBody([{ menuId: MIE_GORENG, qty: 1 }], [{ method: 'CASH', amount: 19720 }], idem2));
+      .send(checkoutBody([{ menuId: MIE_GORENG, qty: 1 }], [{ method: 'CASH', amount: 19814 }], idem2));
     expect(kitchen.status).toBe(200);
     const kitchenSub = kitchen.body.ticket.subtickets.find((s: { stationCode: string }) => s.stationCode === 'KITCHEN');
     const forbidden = await request(server)
@@ -625,7 +625,7 @@ describe('Order-Q API (integration, separate DB)', () => {
         .post('/v1/orders/checkout')
         .set('Authorization', `Bearer ${token}`)
         .set('Idempotency-Key', idem)
-        .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem));
+        .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], idem));
       expect(res.status).toBe(200);
     }
 
@@ -765,7 +765,7 @@ describe('Order-Q API (integration, separate DB)', () => {
   it('idempotency: same key + same body returns the original ticket; different body → 422', async () => {
     const { token } = await openShiftAndRelogin(ADI);
     const idem = IDEM();
-    const body1 = checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20880 }], idem);
+    const body1 = checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], idem);
 
     const first = await request(server)
       .post('/v1/orders/checkout')
@@ -774,7 +774,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .send(body1);
     expect(first.status).toBe(200);
 
-    const different = checkoutBody([{ menuId: KOPI_SUSU, qty: 2 }], [{ method: 'CASH', amount: 41760 }], idem);
+    const different = checkoutBody([{ menuId: KOPI_SUSU, qty: 2 }], [{ method: 'CASH', amount: 41958 }], idem);
     const conflict = await request(server)
       .post('/v1/orders/checkout')
       .set('Authorization', `Bearer ${token}`)
@@ -828,7 +828,7 @@ describe('Order-Q API (integration, separate DB)', () => {
         .post('/v1/orders/checkout')
         .set('Authorization', `Bearer ${token}`)
         .set('Idempotency-Key', idem)
-        .send(checkoutBody([{ menuId, qty: 1 }], [{ method: 'CASH', amount: 11600 }], idem));
+        .send(checkoutBody([{ menuId, qty: 1 }], [{ method: 'CASH', amount: 11655 }], idem));
     };
 
     const results = await Promise.all([
@@ -856,7 +856,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .set('Idempotency-Key', idem)
       .send(checkoutBody(
         [{ menuId: KOPI_SUSU, qty: 1 }, { menuId: MIE_GORENG, qty: 1 }],
-        [{ method: 'CASH', amount: 40600 }],
+        [{ method: 'CASH', amount: 40793 }],
         idem,
       ));
     expect(res.status).toBe(200);
@@ -898,7 +898,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .set('Idempotency-Key', idem)
       .send(checkoutBody(
         [{ menuId: KOPI_SUSU, qty: 1 }, { menuId: MIE_GORENG, qty: 1 }],
-        [{ method: 'CASH', amount: 40600 }],
+        [{ method: 'CASH', amount: 40793 }],
         idem,
       ));
     expect(res.status).toBe(200);
@@ -929,9 +929,9 @@ describe('Order-Q API (integration, separate DB)', () => {
       return res;
     };
 
-    const bar = await checkoutOne(KOPI_SUSU, 20880);
-    const kitchen = await checkoutOne(MIE_GORENG, 19720);
-    const pastry = await checkoutOne(SEED_IDS.menuCroissant, 20880);
+    const bar = await checkoutOne(KOPI_SUSU, 20979);
+    const kitchen = await checkoutOne(MIE_GORENG, 19814);
+    const pastry = await checkoutOne(SEED_IDS.menuCroissant, 20979);
 
     const maker = await login(SEED_IDS.userCitra);
 
@@ -975,7 +975,7 @@ describe('Order-Q API (integration, separate DB)', () => {
       .set('Idempotency-Key', idem)
       .send(checkoutBody(
         [{ menuId: KOPI_SUSU, qty: 1 }, { menuId: MIE_GORENG, qty: 1 }],
-        [{ method: 'CASH', amount: 10000 }, { method: 'QRIS', amount: 30600 }],
+        [{ method: 'CASH', amount: 10000 }, { method: 'QRIS', amount: 30793 }],
         idem,
       ));
     expect(sale.status).toBe(200);
@@ -988,7 +988,7 @@ describe('Order-Q API (integration, separate DB)', () => {
     expect(receipt.body.receipt.ticketNumber).toBe(sale.body.ticket.ticketNumber);
     expect(receipt.body.receipt.cashier.name).toBe('Adi');
     expect(receipt.body.receipt.items).toHaveLength(2);
-    expect(receipt.body.receipt.total).toBe(40600);
+    expect(receipt.body.receipt.total).toBe(40793);
     expect(receipt.body.receipt.payments).toHaveLength(2);
     expect(receipt.body.receipt.businessDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(receipt.body.receipt.eta.min).toBeGreaterThanOrEqual(1);

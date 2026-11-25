@@ -20,7 +20,7 @@ import {
   estimateTicketEta,
   resolveAvgMakeSeconds,
 } from '../../common/queue/queue-math';
-import { applyDiscount, calcTotals } from '../../common/money';
+import { calcTotals } from '../../common/money';
 import { buildReceiptData } from '../../common/receipt/receipt-data';
 import { outletDayKey } from '../../common/time/outlet-time';
 
@@ -173,8 +173,6 @@ export class OrdersService {
       });
     }
 
-    const { tax: taxAmount, service: serviceAmount } = calcTotals(subtotal, taxBps, serviceBps);
-
     // Validate the optional ticket-level discount; the math lives in common/money.ts.
     if (dto.discount) {
       const { type, value } = dto.discount;
@@ -191,12 +189,13 @@ export class OrdersService {
       }
     }
 
-    const { discountAmount, total: totalAmount } = applyDiscount(
-      subtotal,
-      taxAmount,
-      serviceAmount,
-      dto.discount,
-    );
+    // Discount → service → tax, half-up per component (see common/money.ts).
+    const {
+      tax: taxAmount,
+      service: serviceAmount,
+      discountAmount,
+      total: totalAmount,
+    } = calcTotals(subtotal, taxBps, serviceBps, dto.discount);
 
     // Validate payments
     const paymentTotal = dto.payments.reduce((sum, p) => sum + p.amount, 0);
