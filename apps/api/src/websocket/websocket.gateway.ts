@@ -13,17 +13,28 @@ import { ConfigService } from '@nestjs/config';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
-interface AuthenticatedSocket extends Socket {
-  user?: {
-    sub: string;
-    outletId: string;
-    role: string;
-    shiftId?: string;
-    stationId?: string | null;
-    stationIds?: string[];
-  };
+interface SocketUser {
+  sub: string;
+  outletId: string;
+  role: string;
+  type?: string;
+  shiftId?: string;
+  stationId?: string | null;
+  stationIds?: string[];
 }
 
+interface AuthenticatedSocket extends Socket {
+  user?: SocketUser;
+}
+
+/**
+ * Socket.IO gateway.
+ *
+ * Every handshake must carry a valid JWT. Normal staff tokens can join only
+ * their own outlet room (and, for makers, only their assigned station rooms).
+ * A DISPLAY token is read-only: it joins only display:{outletId} and receives
+ * sanitized ticket:ready / ticket:eta-updated payloads (number, status, ETA).
+ */
 @Injectable()
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -34,8 +45,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   server!: Server;
 
   private readonly logger = new Logger(WebsocketGateway.name);
-  private userSockets = new Map<string, Set<string>>(); // userId -> socketIds
-  private outletRooms = new Map<string, Set<string>>(); // outletId -> socketIds
+  private userSockets = new Map<string, Set<string>>();
+  private outletRooms = new Map<string, Set<string>>();
 
   constructor(
     private jwtService: JwtService,
@@ -43,25 +54,60 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     private prisma: PrismaService,
   ) {}
 
+  private isDisplay(user: SocketUser): boolean {
+    return user.type === 'DISPLAY' || user.role === 'DISPLAY';
+  }
+
+  private async allowedStationCodes(user: SocketUser): Promise<string[]> {
+    if (user.role !== 'MAKER') return [];
+    const stationIds = user.stationIds?.length
+      ? user.stationIds
+      : user.stationId
+        ? [user.stationId]
+        : [];
+    const codes: string[] = [];
+    for (const stationId of stationIds) {
+      const station = await this.prisma.station.findFirst({
+        where: { id: stationId, outletId: user.outletId },
+        select: { code: true },
+      });
+      if (station) codes.push(station.code);
+      else this.logger.warn(`Maker ${user.sub} has unknown stationId ${stationId}`);
+    }
+    return codes;
+  }
+
   async handleConnection(client: AuthenticatedSocket) {
     try {
       const token = client.handshake.auth.token || client.handshake.headers.authorization?.replace('Bearer ', '');
 
       if (!token) {
         this.logger.warn(`Client ${client.id} connected without token`);
-        client.disconnect();
+        client.disconnect(true);
         return;
       }
 
       const payload = this.jwtService.verify(token, {
         secret: this.configService.get('app.jwt.secret'),
-      });
+      }) as SocketUser;
+
+      if (!payload?.outletId || !payload?.sub) {
+        client.disconnect(true);
+        return;
+      }
 
       client.user = payload;
-      void client.join(`outlet:${payload.outletId}`)
-      void client.join(`user:${payload.sub}`)
 
-      // Track for cleanup
+      if (this.isDisplay(payload)) {
+        // Read-only display: never joins the general outlet/station rooms.
+        void client.join(`display:${payload.outletId}`);
+        this.logger.log(`Display ${payload.sub} connected for outlet ${payload.outletId}`);
+        return;
+      }
+
+      void client.join(`outlet:${payload.outletId}`);
+      void client.join(`user:${payload.sub}`);
+
       if (!this.userSockets.has(payload.sub)) {
         this.userSockets.set(payload.sub, new Set());
       }
@@ -72,78 +118,69 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       }
       this.outletRooms.get(payload.outletId)!.add(client.id);
 
-      // Makers join the rooms of every station they are assigned to.
-      if (payload.role === 'MAKER') {
-        const stationIds = payload.stationIds?.length
-          ? payload.stationIds
-          : payload.stationId
-            ? [payload.stationId]
-            : [];
-        for (const stationId of stationIds) {
-          const station = await this.prisma.station.findUnique({
-            where: { id: stationId },
-            select: { code: true },
-          });
-          if (station) {
-            void client.join(`station:${payload.outletId}:${station.code}`)
-          } else {
-            this.logger.warn(`Maker ${payload.sub} has unknown stationId ${stationId}`);
-          }
-        }
-        if (stationIds.length === 0) {
-          this.logger.warn(`Maker ${payload.sub} is not assigned to any station; joining no station room`);
-        }
+      for (const code of await this.allowedStationCodes(payload)) {
+        void client.join(`station:${payload.outletId}:${code}`);
       }
 
       this.logger.log(`Client ${client.id} connected: user=${payload.sub}, outlet=${payload.outletId}, role=${payload.role}`);
     } catch (error: unknown) {
       this.logger.warn(`Client ${client.id} auth failed: ${error instanceof Error ? error.message : String(error)}`);
-      client.disconnect();
+      client.disconnect(true);
     }
   }
 
   handleDisconnect(client: AuthenticatedSocket) {
-    if (client.user) {
-      const userSockets = this.userSockets.get(client.user.sub);
-      if (userSockets) {
-        userSockets.delete(client.id);
-        if (userSockets.size === 0) {
-          this.userSockets.delete(client.user.sub);
-        }
-      }
+    if (!client.user) return;
 
-      const outletSockets = this.outletRooms.get(client.user.outletId);
-      if (outletSockets) {
-        outletSockets.delete(client.id);
-        if (outletSockets.size === 0) {
-          this.outletRooms.delete(client.user.outletId);
-        }
-      }
+    const userSockets = this.userSockets.get(client.user.sub);
+    if (userSockets) {
+      userSockets.delete(client.id);
+      if (userSockets.size === 0) this.userSockets.delete(client.user.sub);
+    }
 
-      this.logger.log(`Client ${client.id} disconnected: user=${client.user.sub}`);
+    const outletSockets = this.outletRooms.get(client.user.outletId);
+    if (outletSockets) {
+      outletSockets.delete(client.id);
+      if (outletSockets.size === 0) this.outletRooms.delete(client.user.outletId);
     }
   }
 
+  /** Station rooms are only joinable by makers assigned to that station. */
   @SubscribeMessage('join-station')
-  handleJoinStation(
+  async handleJoinStation(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { stationCode: string },
   ) {
-    if (!client.user) return { success: false, error: 'Not authenticated' };
-
-    void client.join(`station:${client.user.outletId}:${data.stationCode}`)
+    if (!client.user || this.isDisplay(client.user)) {
+      return { success: false, error: 'Not authorized' };
+    }
+    const allowed = await this.allowedStationCodes(client.user);
+    if (!allowed.includes(data.stationCode)) {
+      return { success: false, error: 'Station not allowed' };
+    }
+    void client.join(`station:${client.user.outletId}:${data.stationCode}`);
     return { success: true };
   }
 
   @SubscribeMessage('leave-station')
-  handleLeaveStation(
+  async handleLeaveStation(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { stationCode: string },
   ) {
-    if (!client.user) return { success: false, error: 'Not authenticated' };
-
-    void client.leave(`station:${client.user.outletId}:${data.stationCode}`)
+    if (!client.user || this.isDisplay(client.user)) {
+      return { success: false, error: 'Not authorized' };
+    }
+    void client.leave(`station:${client.user.outletId}:${data.stationCode}`);
     return { success: true };
+  }
+
+  private displayPayload(event: any) {
+    return {
+      ticketNumber: event.ticketNumber,
+      status: event.status ?? 'READY',
+      etaMin: event.etaMin ?? null,
+      etaMax: event.etaMax ?? null,
+    };
   }
 
   // Event emitters for services
@@ -181,12 +218,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   emitTicketReady(outletId: string, event: any) {
     this.server.to(`outlet:${outletId}`).emit('ticket:ready', event);
-    // Also emit to display room
-    this.server.to(`display:${outletId}`).emit('ticket:ready', event);
+    // Display clients receive only number/status/ETA, never customer data.
+    this.server.to(`display:${outletId}`).emit('ticket:ready', this.displayPayload(event));
   }
 
   emitTicketEtaUpdated(outletId: string, event: any) {
     this.server.to(`outlet:${outletId}`).emit('ticket:eta-updated', event);
+    this.server.to(`display:${outletId}`).emit('ticket:eta-updated', this.displayPayload(event));
   }
 
   emitStationQueueUpdated(outletId: string, event: any) {
@@ -205,7 +243,6 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.server.to(`printer:${deviceId}`).emit('printer:status', event);
   }
 
-  // Get connected clients count for monitoring
   getConnectedCount(outletId?: string): number {
     if (outletId) {
       return this.outletRooms.get(outletId)?.size || 0;

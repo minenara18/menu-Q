@@ -13,7 +13,10 @@ import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { UserRole } from '@order-q/shared';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -50,6 +53,16 @@ export class AuthController {
   @ApiOperation({ summary: 'Logout: revoke the refresh-token family' })
   async logout(@Body() body: { refreshToken: string }) {
     return this.authService.logout(body.refreshToken);
+  }
+
+  @Post('display-token')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.OWNER, UserRole.CASHIER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Issue a read-only token for the customer display' })
+  async displayToken(@CurrentUser('outletId') outletId: string) {
+    return this.authService.createDisplayToken(outletId);
   }
 
   @Get('me')

@@ -650,6 +650,9 @@ export class TicketsService {
         ticketNumber: ticket.ticketNumber,
         customerName: ticket.customerName,
         orderType: ticket.orderType,
+        status: 'READY',
+        etaMin: ticket.etaMin,
+        etaMax: ticket.etaMax,
       });
     }
   }

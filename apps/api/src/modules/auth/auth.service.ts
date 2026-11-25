@@ -261,6 +261,21 @@ export class AuthService {
     return { accessToken, refreshToken: newRefreshToken };
   }
 
+  /** Read-only token for the customer-facing display screen. */
+  async createDisplayToken(outletId: string) {
+    const token = this.jwtService.sign(
+      {
+        sub: `display:${randomUUID()}`,
+        outletId,
+        name: 'Display',
+        role: 'DISPLAY',
+        type: 'DISPLAY',
+      },
+      { expiresIn: '12h' },
+    );
+    return { token, tokenType: 'Bearer' };
+  }
+
   async logout(refreshToken: string) {
     const stored = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: this.hashToken(refreshToken) },

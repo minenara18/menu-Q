@@ -152,6 +152,20 @@ export interface Ticket extends BaseEntity {
   shift?: Shift;
 }
 
+export const DisplayTokenResponseSchema = z.object({
+  token: z.string(),
+  tokenType: z.literal('Bearer'),
+});
+export type DisplayTokenResponse = z.infer<typeof DisplayTokenResponseSchema>;
+
+/** Sanitized payload sent to read-only customer display tokens. */
+export interface DisplayTicketEvent {
+  ticketNumber: string;
+  status: string;
+  etaMin: number | null;
+  etaMax: number | null;
+}
+
 export const TicketNumberSchema = z.string().regex(/^[A-Z]-\d{3,}$/);
 
 // SubTicket (per station)
