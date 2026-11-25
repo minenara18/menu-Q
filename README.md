@@ -21,6 +21,14 @@ npm run doctor --workspace apps/mobile
 npm run build:mobile
 ```
 
+Versi: **Expo SDK 58** (React Native 0.88.1, React 19.3.0, TypeScript ~6.0.3). Minimal Expo Go
+yang disarankan: versi yang mendukung SDK 58 (Semester 2 2026); jika Expo Go menolak SDK,
+perbarui Expo Go dari Play Store/App Store. Jika masih tidak cocok, turunkan `expo`/`react-native`
+ke SDK yang didukung Expo Go Anda (mis. SDK 51) dan sesuaikan dependensi native yang terbundling.
+Dependensi React/RN di-root sengaja di-hoist oleh workspaces; `.npmrc` (`legacy-peer-deps=true`)
+dibutuhkan karena peer dependency Expo 58 (mise/TS6) konflik dengan resolver npm ketat — ini
+hanya pengaturan instalasi, tidak menambah modul native ke `apps/api`.
+
 Sebelum `expo start`, set `EXPO_PUBLIC_API_URL` ke **IP LAN** komputer (bukan `localhost`), mis.
 `http://192.168.1.10:3000`. Nilai itu juga bisa diisi di layar **Setup Perangkat** saat pertama
 membuka aplikasi. Kode outlet demo: `DEMO01`; PIN: Adi `123456` (kasir), Budi `123456` (KDS),

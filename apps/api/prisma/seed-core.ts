@@ -53,7 +53,15 @@ export async function seedDatabase(prisma: PrismaClient) {
   const tepung = await ing(SEED_IDS.ingTepung, 'Tepung croissant', 'g', 5000);
   const mk = async (id: string, name: string, price: number, categoryId: string, stationId: string, secs: number, recipe: Array<[string, number]>) => {
     let menu = await prisma.menu.findFirst({ where: { outletId: outlet.id, name } });
-    if (!menu) menu = await prisma.menu.create({ data: { id, outletId: outlet.id, categoryId, stationId, name, price, avgMakeSeconds: secs } });
+    if (!menu) {
+      menu = await prisma.menu.create({ data: { id, outletId: outlet.id, categoryId, stationId, name, price, avgMakeSeconds: secs, makeSampleCount: 0 } });
+    } else {
+      // Demo seed resets learned timings so ETA is deterministic after seeding.
+      menu = await prisma.menu.update({
+        where: { id: menu.id },
+        data: { avgMakeSeconds: secs, makeSampleCount: 0 },
+      });
+    }
     await prisma.recipeLine.deleteMany({ where: { menuId: menu.id } });
     for (const [iid, q] of recipe) await prisma.recipeLine.create({ data: { menuId: menu.id, ingredientId: iid, qtyPerPortion: q } });
   };

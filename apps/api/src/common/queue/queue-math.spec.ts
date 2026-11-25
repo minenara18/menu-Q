@@ -40,16 +40,30 @@ describe('queue-math (pure ETA & priority)', () => {
     });
   });
 
-  describe('ETA range', () => {
-    it('station ETA is queue work + new work', () => {
+  describe('ETA range (absolute values in MINUTES)', () => {
+    it('station ETA is queue work + new work in seconds', () => {
       expect(estimateStationEtaSeconds(600, 180)).toBe(780);
     });
 
-    it('ticket ETA is the slowest station, shown as a -20%/+30% range', () => {
-      const { point, min, max } = estimateTicketEta([600, 780, 300], 0);
-      expect(point).toBe(780);
-      expect(min).toBe(624); // 780 * 0.8
-      expect(max).toBe(1014); // 780 * 1.3
+    it('one 180-second drink in an empty queue yields about 2.4-3.9 minutes', () => {
+      const { point, min, max } = estimateTicketEta([180], 0);
+      expect(point).toBeCloseTo(3);
+      expect(min).toBe(2); // 180 s * 0.8 / 60 = 2.4 -> 2
+      expect(max).toBe(4); // 180 s * 1.3 / 60 = 3.9 -> 4
+    });
+
+    it('uses the SLOWEST station when items span two stations', () => {
+      const { point, min, max } = estimateTicketEta([180, 600], 0);
+      expect(point).toBeCloseTo(10);
+      expect(min).toBe(8);
+      expect(max).toBe(13);
+    });
+
+    it('adds real remaining queue work before converting to minutes', () => {
+      const { point, min, max } = estimateTicketEta([180 + 180], 1);
+      expect(point).toBeCloseTo(6.12); // (360 s * 1.02) / 60
+      expect(min).toBe(5);
+      expect(max).toBe(8);
     });
 
     it('applies a capped congestion factor', () => {
@@ -57,7 +71,12 @@ describe('queue-math (pure ETA & priority)', () => {
       expect(computeDensityFactor(10)).toBeCloseTo(1.2);
       expect(computeDensityFactor(1000)).toBeCloseTo(1.25);
       const { point } = estimateTicketEta([600], 10);
-      expect(point).toBeCloseTo(720);
+      expect(point).toBeCloseTo(12); // 600 s * 1.2 / 60
+    });
+
+    it('respects category fallback values (180 s drinks, 600 s food)', () => {
+      expect(estimateTicketEta([180], 0).max).toBe(4);
+      expect(estimateTicketEta([600], 0).max).toBe(13);
     });
   });
 

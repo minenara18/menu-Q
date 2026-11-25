@@ -509,8 +509,14 @@ describe('Order-Q API (integration, separate DB)', () => {
     expect(esp.currentQty).toBe(2000);
   });
 
-  it('ETA: checkout and validate return a min/max range', async () => {
-    const { token } = await openShiftAndRelogin(ADI);
+  it('shift opened after login: checkout works with the ORIGINAL token (no re-login)', async () => {
+    const token = await login(ADI);
+    const opened = await request(server)
+      .post('/v1/shifts/open')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ openingCash: 100000 });
+    expect(opened.status).toBe(201);
+
     const idem = IDEM();
     const res = await request(server)
       .post('/v1/orders/checkout')
@@ -518,16 +524,48 @@ describe('Order-Q API (integration, separate DB)', () => {
       .set('Idempotency-Key', idem)
       .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], idem));
     expect(res.status).toBe(200);
-    expect(res.body.ticket.etaMin).toBeGreaterThanOrEqual(1);
-    expect(res.body.ticket.etaMax).toBeGreaterThanOrEqual(res.body.ticket.etaMin);
+    expect(res.body.ticket.ticketNumber).toMatch(/^A-\d{3,}$/);
+  });
 
+  it('ETA: one 180s drink in an empty queue is 2-4 MINUTES in checkout and validate', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+
+    // Validasi dilakukan SEBELUM checkout, saat antrean masih kosong.
     const val = await request(server)
       .post('/v1/orders/validate')
       .set('Authorization', `Bearer ${token}`)
       .send({ items: [{ menuId: KOPI_SUSU, qty: 1 }] });
     expect(val.status).toBe(200);
-    expect(val.body.eta.min).toBeGreaterThanOrEqual(1);
-    expect(val.body.eta.max).toBeGreaterThanOrEqual(val.body.eta.min);
+    // 180 detik fallback minuman -> 2,4-3,9 menit, dibulatkan ke menit.
+    expect(val.body.eta.min).toBe(2);
+    expect(val.body.eta.max).toBe(4);
+
+    // Dua stasiun: yang lebih lambat (Makanan 600 dtk) yang menentukan.
+    const two = await request(server)
+      .post('/v1/orders/validate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ items: [{ menuId: KOPI_SUSU, qty: 1 }, { menuId: MIE_GORENG, qty: 1 }] });
+    expect(two.status).toBe(200);
+    expect(two.body.eta.min).toBe(8);
+    expect(two.body.eta.max).toBe(13);
+
+    const idem = IDEM();
+    const res = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idem)
+      .send(checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], idem));
+    expect(res.status).toBe(200);
+    expect(res.body.ticket.etaMin).toBe(2);
+    expect(res.body.ticket.etaMax).toBe(4);
+
+    // Setelah tiket masuk antrean, ETA tiket baru bertambah (180+180 detik).
+    const queued = await request(server)
+      .post('/v1/orders/validate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ items: [{ menuId: KOPI_SUSU, qty: 1 }] });
+    expect(queued.body.eta.min).toBe(5);
+    expect(queued.body.eta.max).toBe(8);
   });
 
   it('ETA: completing a subticket learns avgMakeSeconds and re-emits the ETA', async () => {
@@ -568,6 +606,11 @@ describe('Order-Q API (integration, separate DB)', () => {
     expect(menu.makeSampleCount).toBe(1);
     expect(menu.avgMakeSeconds).toBe(300); // first sample replaces the fallback
     expect(etaSpy).toHaveBeenCalled();
+    // ETA pada event juga dalam MENIT (antrean tiket ini sudah kosong -> 1-1).
+    expect(etaSpy).toHaveBeenCalledWith(
+      OUTLET,
+      expect.objectContaining({ etaMin: 1, etaMax: 1 }),
+    );
     etaSpy.mockRestore();
   });
 
@@ -1017,6 +1060,7 @@ describe('Order-Q API (integration, separate DB)', () => {
     const adi = known.body.staff.find((s: { name: string }) => s.name === 'Adi');
     expect(adi).toMatchObject({ name: 'Adi', role: 'CASHIER' });
     expect(Object.keys(adi).sort()).toEqual(['id', 'name', 'role']);
+    expect(adi.name).not.toContain(' '); // hanya nama depan
 
     const byCode = await request(server)
       .post('/v1/auth/pin-login')

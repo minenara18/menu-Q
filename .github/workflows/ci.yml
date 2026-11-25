@@ -71,6 +71,15 @@ jobs:
       - name: Unit tests
         run: npm test --workspace @order-q/api
 
+      - name: Mobile typecheck
+        run: npm run typecheck --workspace apps/mobile
+
+      - name: Mobile lint
+        run: npm run lint --workspace apps/mobile
+
+      - name: Mobile tests
+        run: npm test --workspace apps/mobile
+
       - name: Apply migrations (dev-like DB)
         run: npx prisma migrate deploy
         working-directory: apps/api

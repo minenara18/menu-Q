@@ -72,10 +72,20 @@ export class OrdersService {
     private websocketGateway: WebsocketGateway,
   ) {}
 
-  async checkout(outletId: string, shiftId: string, userId: string, dto: CheckoutDto): Promise<CheckoutResult> {
-    if (!shiftId) {
-      // JWT carries shiftId at login time; an open shift created afterwards requires a re-login.
-      throw new BadRequestException('No active shift in token. Open a shift and sign in again.');
+  async checkout(outletId: string, shiftId: string | undefined, userId: string, dto: CheckoutDto): Promise<CheckoutResult> {
+    // A token issued before the shift was opened has no shiftId. Resolve the
+    // active shift server-side so the client never has to re-login.
+    let effectiveShiftId = shiftId;
+    if (!effectiveShiftId) {
+      const activeShift = await this.prisma.shift.findFirst({
+        where: { outletId, status: 'OPEN' },
+        orderBy: { openedAt: 'desc' },
+        select: { id: true },
+      });
+      if (!activeShift) {
+        throw new BadRequestException('Tidak ada shift aktif. Buka shift terlebih dahulu.');
+      }
+      effectiveShiftId = activeShift.id;
     }
 
     const idemKey = dto.clientTicketId ?? dto.idempotencyKey;
@@ -128,7 +138,7 @@ export class OrdersService {
     }
 
     // Get active shift
-    const shift = await this.shiftsService.findById(outletId, shiftId);
+    const shift = await this.shiftsService.findById(outletId, effectiveShiftId);
     if (shift.status !== 'OPEN') {
       throw new BadRequestException('Shift is not open');
     }
@@ -222,7 +232,7 @@ export class OrdersService {
 
     const runCheckout = async () => this.prisma.$transaction(async (tx: import("@prisma/client").Prisma.TransactionClient) => {
       // Serialize checkouts per shift so dailyNo allocation is race-free
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${outletId} || ':' || ${businessDay} || ':' || ${shiftId}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${outletId} || ':' || ${businessDay} || ':' || ${effectiveShiftId}))`;
 
       // Claim the idempotency key inside the transaction (unique per outlet).
       await tx.idempotencyKey.create({
@@ -235,7 +245,7 @@ export class OrdersService {
 
       // Generate ticket number atomically inside the transaction
       const lastTicket = await tx.ticket.findFirst({
-        where: { shiftId },
+        where: { shiftId: effectiveShiftId },
         orderBy: { dailyNo: 'desc' },
         select: { dailyNo: true },
       });
@@ -246,7 +256,7 @@ export class OrdersService {
       const ticket = await tx.ticket.create({
         data: {
           outletId,
-          shiftId,
+          shiftId: effectiveShiftId,
           dailyNo,
           ticketNumber,
           customerName: dto.customerName,

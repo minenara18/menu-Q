@@ -141,7 +141,9 @@ export interface Ticket extends BaseEntity {
   tableLabel?: string;
   clientTicketId?: string;
   status: TicketStatus;
+  /** Estimasi waktu tunggu dalam MENIT (bukan detik). */
   etaMin?: number;
+  /** Estimasi waktu tunggu dalam MENIT (bukan detik). */
   etaMax?: number;
   subtotal: number;
   taxAmount: number;

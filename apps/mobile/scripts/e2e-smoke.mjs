@@ -50,12 +50,7 @@ async function main() {
     // Shift sudah terbuka dari seed/run sebelumnya — lanjut.
   }
 
-  // JWT membawa shiftId saat login; login ulang setelah shift dibuka.
-  const cashierWithShift = await call('/auth/pin-login', {
-    method: 'POST',
-    body: { outletCode: 'DEMO01', userId: adi.id, pin: '123456' },
-  });
-  cashier.accessToken = cashierWithShift.accessToken;
+  // Token yang sama dipakai: server menurunkan shift aktif saat checkout.
 
   const menus = await call('/menus', { token: cashier.accessToken });
   const kopi = menus.find((m) => m.name === 'Kopi Susu');
@@ -95,6 +90,10 @@ async function main() {
     },
   });
   const created = await createdPromise;
+  const { etaMin, etaMax } = checkout.ticket;
+  if (!(etaMin >= 1 && etaMax >= etaMin && etaMax <= 60)) {
+    throw new Error(`ETA tidak masuk akal untuk Kopi Susu: ${etaMin}-${etaMax} menit`);
+  }
 
   const tickets = await call('/tickets', { token: cashier.accessToken });
   const ticket = tickets.tickets.find((t) => t.id === checkout.ticket.id);

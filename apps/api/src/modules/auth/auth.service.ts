@@ -288,9 +288,10 @@ export class AuthService {
     });
 
     return {
+      // Hanya nama depan: tidak perlu identitas lengkap untuk memilih staf di perangkat.
       staff: users.map((user) => ({
         id: user.id,
-        name: user.name,
+        name: user.name.trim().split(/\s+/)[0],
         role: String(user.role),
       })),
     };

@@ -73,14 +73,17 @@ export function estimateStationEtaSeconds(queueWorkSeconds: number, newWorkSecon
 }
 
 /**
- * Ticket ETA = slowest station, scaled by congestion, expressed as a range.
+ * Ticket ETA = slowest station, scaled by congestion, expressed as a RANGE IN
+ * MINUTES. Inputs are seconds (make times); the single conversion point is here
+ * so checkout, validate, events, receipt and display all agree on the unit.
  */
 export function estimateTicketEta(
   stationEtas: number[],
   activeSubticketCount: number,
 ): { point: number; min: number; max: number } {
   const peak = stationEtas.length > 0 ? Math.max(...stationEtas) : 0;
-  const point = peak * computeDensityFactor(activeSubticketCount);
+  const pointSeconds = peak * computeDensityFactor(activeSubticketCount);
+  const point = pointSeconds / 60;
   const min = Math.max(1, roundHalfUp(point * ETA_MIN_FACTOR));
   const max = Math.max(min, roundHalfUp(point * ETA_MAX_FACTOR));
   return { point, min, max };
