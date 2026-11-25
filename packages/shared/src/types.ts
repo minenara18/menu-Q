@@ -228,6 +228,25 @@ export interface DeviceOutbox extends BaseEntity {
 }
 
 // API Contracts
+export const LoginOptionSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  role: z.string(),
+});
+export const LoginOptionsResponseSchema = z.object({ staff: z.array(LoginOptionSchema) });
+export type LoginOption = z.infer<typeof LoginOptionSchema>;
+export type LoginOptionsResponse = z.infer<typeof LoginOptionsResponseSchema>;
+
+export const DisplayPairCodeResponseSchema = z.object({
+  code: z.string().length(6),
+  expiresAt: z.string(),
+  expiresInSeconds: z.number(),
+});
+export type DisplayPairCodeResponse = z.infer<typeof DisplayPairCodeResponseSchema>;
+
+export const DisplayPairRequestSchema = z.object({ code: z.string().min(6).max(6) });
+export type DisplayPairRequest = z.infer<typeof DisplayPairRequestSchema>;
+
 export const LoginRequestSchema = z.object({
   outletId: z.string().uuid(),
   userId: z.string().uuid(),

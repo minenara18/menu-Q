@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Get,
+  Query,
   UseGuards,
   Req,
 } from '@nestjs/common';
@@ -22,6 +23,31 @@ import { UserRole } from '@order-q/shared';
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
+
+  @Get('login-options')
+  @ApiOperation({ summary: 'Public staff options for a device (id, name, role only)' })
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async loginOptions(@Query('outletCode') outletCode?: string) {
+    return this.authService.loginOptions(outletCode ?? '');
+  }
+
+  @Post('display-pair-code')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.OWNER, UserRole.CASHIER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a single-use 6-digit display pairing code' })
+  async displayPairCode(@CurrentUser('outletId') outletId: string) {
+    return this.authService.createDisplayPairCode(outletId);
+  }
+
+  @Post('display-pair')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Redeem a display pairing code for a read-only token' })
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async displayPair(@Body() body: { code: string }) {
+    return this.authService.redeemDisplayPairCode(body.code ?? '');
+  }
 
   @Post('pin-login')
   @HttpCode(HttpStatus.OK)

@@ -75,6 +75,8 @@ enum MenuAvailability {
 
 model Outlet {
   id            String   @id @default(uuid())
+  // Short public code used by devices to find login options (e.g. DEMO01).
+  code          String?  @unique
   name          String
   address       String?
   phone         String?
@@ -443,6 +445,17 @@ model PinAttempt {
   updatedAt     DateTime  @updatedAt
 
   @@unique([kind, outletId, userId, ip])
+  @@index([outletId])
+}
+
+model DisplayPairCode {
+  id        String    @id @default(uuid())
+  outletId  String
+  codeHash  String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
   @@index([outletId])
 }
 

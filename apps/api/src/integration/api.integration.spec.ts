@@ -72,6 +72,7 @@ describe('Order-Q API (integration, separate DB)', () => {
     await prisma.pinAttempt.deleteMany({});
     await prisma.refreshToken.deleteMany({});
     await prisma.idempotencyKey.deleteMany({});
+    await prisma.displayPairCode.deleteMany({});
     // Clear in-memory throttler state so rate-limit tests are deterministic.
     const storage = app.get(ThrottlerStorage) as unknown as {
       storage: Record<string, unknown>;
@@ -1004,6 +1005,52 @@ describe('Order-Q API (integration, separate DB)', () => {
 
     const makerAfter = await login(SEED_IDS.userCitra);
     expect((await request(server).get(`/v1/stations/${SEED_IDS.stationKitchen}/queue`).set('Authorization', `Bearer ${makerAfter}`)).status).toBe(403);
+  });
+
+  it('login-options: unknown outlet looks empty; known outlet exposes only id/name/role', async () => {
+    const unknown = await request(server).get('/v1/auth/login-options?outletCode=NOPE99');
+    expect(unknown.status).toBe(200);
+    expect(unknown.body).toEqual({ staff: [] });
+
+    const known = await request(server).get('/v1/auth/login-options?outletCode=DEMO01');
+    expect(known.status).toBe(200);
+    const adi = known.body.staff.find((s: { name: string }) => s.name === 'Adi');
+    expect(adi).toMatchObject({ name: 'Adi', role: 'CASHIER' });
+    expect(Object.keys(adi).sort()).toEqual(['id', 'name', 'role']);
+  });
+
+  it('display pairing: single-use, expiring, redeemable into a display token', async () => {
+    const owner = await login(SINTA);
+    const created = await request(server)
+      .post('/v1/auth/display-pair-code')
+      .set('Authorization', `Bearer ${owner}`)
+      .send({});
+    expect(created.status).toBe(200);
+    expect(created.body.code).toMatch(/^\d{6}$/);
+
+    const redeemed = await request(server)
+      .post('/v1/auth/display-pair')
+      .send({ code: created.body.code });
+    expect(redeemed.status).toBe(200);
+    expect(redeemed.body.token).toBeDefined();
+
+    const reused = await request(server)
+      .post('/v1/auth/display-pair')
+      .send({ code: created.body.code });
+    expect(reused.status).toBe(401);
+
+    const expired = await request(server)
+      .post('/v1/auth/display-pair-code')
+      .set('Authorization', `Bearer ${owner}`)
+      .send({});
+    await prisma.displayPairCode.updateMany({
+      where: { usedAt: null },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+    const redeemedExpired = await request(server)
+      .post('/v1/auth/display-pair')
+      .send({ code: expired.body.code });
+    expect(redeemedExpired.status).toBe(401);
   });
 
   it('receipt: structured data, rendered text and audited reprint with RBAC', async () => {

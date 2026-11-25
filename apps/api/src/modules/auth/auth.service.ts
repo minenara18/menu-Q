@@ -2,7 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
-import { createHash, randomUUID } from 'crypto';
+import { createHash, randomInt, randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole } from '@order-q/shared';
 
@@ -259,6 +259,69 @@ export class AuthService {
     ]);
 
     return { accessToken, refreshToken: newRefreshToken };
+  }
+
+  /**
+   * Public login options for a device. Unknown outlets get the same empty
+   * response as outlets with no active staff, so codes cannot be enumerated.
+   */
+  async loginOptions(outletCode: string) {
+    const outlet = await this.prisma.outlet.findUnique({ where: { code: outletCode.trim() } });
+    if (!outlet) {
+      return { staff: [] as Array<{ id: string; name: string; role: string }> };
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: { outletId: outlet.id, isActive: true },
+      select: { id: true, name: true, role: true },
+      orderBy: { name: 'asc' },
+    });
+
+    return {
+      staff: users.map((user) => ({
+        id: user.id,
+        name: user.name,
+        role: String(user.role),
+      })),
+    };
+  }
+
+  /** Single-use, short-lived 6-digit code that redeems into a display token. */
+  async createDisplayPairCode(outletId: string) {
+    const code = String(randomInt(100000, 1000000));
+    const expiresAt = new Date(Date.now() + 2 * 60 * 1000);
+
+    await this.prisma.displayPairCode.create({
+      data: {
+        outletId,
+        codeHash: this.hashToken(code),
+        expiresAt,
+      },
+    });
+
+    return { code, expiresAt, expiresInSeconds: 120 };
+  }
+
+  async redeemDisplayPairCode(code: string) {
+    const record = await this.prisma.displayPairCode.findUnique({
+      where: { codeHash: this.hashToken(code.trim()) },
+    });
+
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new UnauthorizedException('Kode pairing tidak valid atau kedaluwarsa');
+    }
+
+    // Atomic claim: only one device can redeem a code.
+    const claimed = await this.prisma.displayPairCode.updateMany({
+      where: { id: record.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    if (claimed.count !== 1) {
+      throw new UnauthorizedException('Kode pairing tidak valid atau kedaluwarsa');
+    }
+
+    return this.createDisplayToken(record.outletId);
   }
 
   /** Read-only token for the customer-facing display screen. */
