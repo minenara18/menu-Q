@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ConflictException }
 import { PrismaService } from '../../prisma/prisma.service';
 import { ShiftStatus } from '@order-q/shared';
 import { ManagerPinService } from '../auth/manager-pin.service';
+import { outletDayKey } from '../../common/time/outlet-time';
 
 interface OpenShiftDto {
   openingCash: number;
@@ -114,10 +115,13 @@ export class ShiftsService {
     });
 
     const expectedCash = shift.openingCash + (cashPayments._sum.amount || 0) - (cashRefunds._sum.amount || 0);
+    const outlet = await this.prisma.outlet.findUnique({ where: { id: outletId } });
+    const businessDate = outletDayKey(shift.openedAt, outlet?.timezone ?? 'Asia/Jakarta');
 
     return {
       shift: {
         id: shift.id,
+        businessDate,
         status: shift.status,
         openedAt: shift.openedAt,
         closedAt: shift.closedAt,

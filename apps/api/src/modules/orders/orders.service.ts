@@ -22,6 +22,7 @@ import {
 } from '../../common/queue/queue-math';
 import { applyDiscount, calcTotals } from '../../common/money';
 import { buildReceiptData } from '../../common/receipt/receipt-data';
+import { outletDayKey } from '../../common/time/outlet-time';
 
 /** Minimal menu shape needed for ETA computation. */
 interface EtaMenu {
@@ -153,6 +154,8 @@ export class OrdersService {
     const outlet = await this.prisma.outlet.findUnique({ where: { id: outletId } });
     const taxBps = outlet?.taxRate ?? 1100;
     const serviceBps = outlet?.serviceRate ?? 500;
+    // Daily business boundary follows the outlet's time zone, not the machine TZ.
+    const businessDay = outletDayKey(new Date(), outlet?.timezone ?? 'Asia/Jakarta');
 
     let subtotal = 0;
     const orderItemsData: any[] = [];
@@ -217,7 +220,7 @@ export class OrdersService {
 
     const runCheckout = async () => this.prisma.$transaction(async (tx: import("@prisma/client").Prisma.TransactionClient) => {
       // Serialize checkouts per shift so dailyNo allocation is race-free
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${outletId} || ':' || ${shiftId}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${outletId} || ':' || ${businessDay} || ':' || ${shiftId}))`;
 
       // Claim the idempotency key inside the transaction (unique per outlet).
       await tx.idempotencyKey.create({

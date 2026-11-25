@@ -990,6 +990,7 @@ describe('Order-Q API (integration, separate DB)', () => {
     expect(receipt.body.receipt.items).toHaveLength(2);
     expect(receipt.body.receipt.total).toBe(40600);
     expect(receipt.body.receipt.payments).toHaveLength(2);
+    expect(receipt.body.receipt.businessDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(receipt.body.receipt.eta.min).toBeGreaterThanOrEqual(1);
     expect(receipt.body.text.every((line: string) => line.length === 48)).toBe(true);
     expect(receipt.body.escpos).toMatch(/^[A-Za-z0-9+/=]+$/);

@@ -1,3 +1,5 @@
+import { outletDayKey } from '../time/outlet-time';
+
 /**
  * One canonical receipt data builder. Both checkout responses and the
  * GET /tickets/:id/receipt endpoint use this function, so there is only one
@@ -26,6 +28,8 @@ export interface ReceiptData {
   currency: string;
   ticketNumber: string;
   date: string;
+  /** YYYY-MM-DD in the outlet's time zone. */
+  businessDate: string;
   timestamp: string;
   cashier: { id: string; name: string } | null;
   orderType?: string;
@@ -75,6 +79,7 @@ interface IncludedTicket {
       receiptHeader?: string | null;
       receiptFooter?: string | null;
       currency?: string;
+      timezone?: string;
     } | null;
   } | null;
 }
@@ -103,6 +108,7 @@ export function buildReceiptData(ticket: IncludedTicket): ReceiptData {
     currency: outlet?.currency ?? 'IDR',
     ticketNumber: ticket.ticketNumber,
     date,
+    businessDate: outletDayKey(date, outlet?.timezone ?? 'Asia/Jakarta'),
     timestamp: date,
     cashier: ticket.shift?.openedByUser
       ? { id: ticket.shift.openedByUser.id, name: ticket.shift.openedByUser.name }
