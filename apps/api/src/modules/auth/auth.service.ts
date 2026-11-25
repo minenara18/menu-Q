@@ -84,6 +84,16 @@ export class AuthService {
     };
   }
 
+  /** Device-friendly login: resolve the outlet from its public short code. */
+  async loginWithCode(outletCode: string, userId: string, pin: string, ip = '') {
+    const outlet = await this.prisma.outlet.findUnique({ where: { code: outletCode?.trim() ?? '' } });
+    // Uniform failure so outlet codes cannot be enumerated through login.
+    if (!outlet) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    return this.login(outlet.id, userId, pin, ip);
+  }
+
   async login(outletId: string, userId: string, pin: string, ip = '') {
     const now = new Date();
     const maxAttempts = this.configService.get<number>('app.pin.maxAttempts') ?? 5;

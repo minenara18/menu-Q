@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-native",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "ignoreDeprecations": "6.0",
+    "noEmit": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["react", "jest"],
+    "baseUrl": ".",
+    "paths": {
+      "@order-q/shared": ["../../packages/shared/src"]
+    }
+  },
+  "include": ["App.tsx", "src/**/*"],
+  "exclude": ["node_modules", "dist", ".expo"]
+}

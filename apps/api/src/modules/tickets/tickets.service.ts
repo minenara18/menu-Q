@@ -639,7 +639,9 @@ export class TicketsService {
       isReady = ticket.subtickets.every((st: typeof ticket.subtickets[0]) => st.status === 'READY');
     }
 
-    if (isReady && (ticket.status as TicketStatus) !== TicketStatus.READY && (ticket.status as TicketStatus) !== TicketStatus.COMPLETED) {
+    // updateAggregateTicketStatus may already have set READY; still emit so
+    // KDS and display clients see the customer-facing "siap" transition.
+    if (isReady && (ticket.status as TicketStatus) !== TicketStatus.COMPLETED) {
       await this.prisma.ticket.update({
         where: { id: ticketId },
         data: { status: 'READY' },

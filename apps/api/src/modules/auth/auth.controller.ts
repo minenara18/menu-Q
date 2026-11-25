@@ -62,9 +62,12 @@ export class AuthController {
   })
   async pinLogin(
     @Req() req: Request,
-    @Body() body: { outletId: string; userId: string; pin: string },
+    @Body() body: { outletId?: string; outletCode?: string; userId: string; pin: string },
   ) {
-    return this.authService.login(body.outletId, body.userId, body.pin, req.ip);
+    if (body.outletCode) {
+      return this.authService.loginWithCode(body.outletCode, body.userId, body.pin, req.ip);
+    }
+    return this.authService.login(body.outletId ?? '', body.userId, body.pin, req.ip);
   }
 
   @Post('refresh')

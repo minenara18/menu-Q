@@ -248,7 +248,8 @@ export const DisplayPairRequestSchema = z.object({ code: z.string().min(6).max(6
 export type DisplayPairRequest = z.infer<typeof DisplayPairRequestSchema>;
 
 export const LoginRequestSchema = z.object({
-  outletId: z.string().uuid(),
+  outletId: z.string().uuid().optional(),
+  outletCode: z.string().min(4).max(12).optional(),
   userId: z.string().uuid(),
   pin: z.string().length(6),
 });

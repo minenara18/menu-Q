@@ -29,7 +29,7 @@ export async function seedDatabase(prisma: PrismaClient) {
   const pin = async (p: string) => argon2.hash(p, { type: argon2.argon2id, memoryCost: 2 ** 12, timeCost: 2, parallelism: 1 });
   const outlet = await prisma.outlet.upsert({
     where: { id: SEED_IDS.outlet },
-    update: {},
+    update: { code: 'DEMO01' },
     create: { id: SEED_IDS.outlet, code: 'DEMO01', name: 'Kopi Senja Demo', taxRate: 1100, serviceRate: 500, lowStockThreshold: 5, varianceThreshold: 10000, partialReadyPolicy: 'WAIT_ALL' },
   });
   for (const [id, code, name, color, sla] of [

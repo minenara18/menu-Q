@@ -8,7 +8,28 @@ berupa rentang, prioritas antrean transparan, dan data struk siap cetak.
 
 ## Stack & struktur monorepo
 
-- **Mobile**: React Native (Expo, TS) — `apps/mobile` — *(belum dikerjakan; 0 layar)*
+- **Mobile**: React Native (Expo SDK 58, TS) — `apps/mobile` — M1 online: Setup Perangkat,
+  Login PIN, Shift, Beranda Kasir, Pembayaran Tunai, Sukses, KDS, Display.
+
+## Mobile (M1)
+
+```bash
+npm run typecheck --workspace apps/mobile
+npm run lint --workspace apps/mobile
+npm test --workspace apps/mobile
+npm run doctor --workspace apps/mobile
+npm run build:mobile
+```
+
+Sebelum `expo start`, set `EXPO_PUBLIC_API_URL` ke **IP LAN** komputer (bukan `localhost`), mis.
+`http://192.168.1.10:3000`. Nilai itu juga bisa diisi di layar **Setup Perangkat** saat pertama
+membuka aplikasi. Kode outlet demo: `DEMO01`; PIN: Adi `123456` (kasir), Budi `123456` (KDS),
+Sinta `123456` (owner). Pairing Display: owner membuat kode 6 digit dari
+`POST /v1/auth/display-pair-code`, perangkat Display menukarnya legar `POST /v1/auth/display-pair`.
+
+Uji alur otomatis terhadap backend lokal: lihat `apps/mobile/docs/e2e.md` dan jalankan
+`node apps/mobile/scripts/e2e-smoke.mjs` saat API berjalan. Kesesuaian visual/haptic di perangkat
+nyata **TIDAK TERVERIFIKASI** — ikuti langkah Expo Go di berkas tersebut.
 - **Backend**: NestJS 10 + Prisma 5 + PostgreSQL — `apps/api`
 - **Real-time**: Socket.IO — event `ticket:created`, `ticket:updated`, `ticket:eta-updated`,
   `subticket:updated`, `ticket:ready`, `station:queue-updated`, `stock:changed`, `shift:closed`

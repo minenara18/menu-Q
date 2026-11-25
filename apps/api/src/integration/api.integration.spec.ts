@@ -1017,6 +1017,15 @@ describe('Order-Q API (integration, separate DB)', () => {
     const adi = known.body.staff.find((s: { name: string }) => s.name === 'Adi');
     expect(adi).toMatchObject({ name: 'Adi', role: 'CASHIER' });
     expect(Object.keys(adi).sort()).toEqual(['id', 'name', 'role']);
+
+    const byCode = await request(server)
+      .post('/v1/auth/pin-login')
+      .send({ outletCode: 'DEMO01', userId: ADI, pin: '123456' });
+    expect(byCode.status).toBe(200);
+    const badCode = await request(server)
+      .post('/v1/auth/pin-login')
+      .send({ outletCode: 'NOPE99', userId: ADI, pin: '123456' });
+    expect(badCode.status).toBe(401);
   });
 
   it('display pairing: single-use, expiring, redeemable into a display token', async () => {

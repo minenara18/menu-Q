@@ -571,13 +571,20 @@ export class OrdersService {
       subtotal += menu.price * item.qty;
     }
 
-    // Estimate ETA
+    // Estimate ETA and the exact payable total so clients can build a valid checkout.
     const eta = await this.computeEtaForItems(outletId, items, menus);
+    const outlet = await this.prisma.outlet.findUnique({ where: { id: outletId } });
+    const { total } = calcTotals(
+      subtotal,
+      outlet?.taxRate ?? 1100,
+      outlet?.serviceRate ?? 500,
+    );
 
     return {
       valid: stockCheck.canFulfill,
       insufficientItems: stockCheck.insufficientItems,
       subtotal,
+      total,
       eta,
     };
   }

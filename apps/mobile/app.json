@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Order-Q",
+    "slug": "order-q",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "sdkVersion": "58.0.0",
+    "platforms": ["ios", "android"],
+    "ios": { "supportsTablet": true },
+    "android": {},
+    "web": { "bundler": "metro" },
+    "plugins": ["expo-font", "expo-secure-store"],
+    "extra": {
+      "apiUrl": "http://192.168.1.10:3000"
+    }
+  }
+}
