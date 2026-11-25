@@ -34,6 +34,7 @@ export interface ReceiptData {
   cashier: { id: string; name: string } | null;
   orderType?: string;
   tableNumber?: string | null;
+  tableLabel?: string | null;
   customerName?: string | null;
   items: ReceiptDataItem[];
   subtotal: number;
@@ -52,6 +53,7 @@ interface IncludedTicket {
   customerName?: string | null;
   orderType?: string;
   tableNumber?: string | null;
+  tableLabel?: string | null;
   subtotal: number;
   taxAmount: number;
   serviceAmount: number;
@@ -115,6 +117,7 @@ export function buildReceiptData(ticket: IncludedTicket): ReceiptData {
       : null,
     orderType: ticket.orderType,
     tableNumber: ticket.tableNumber ?? null,
+    tableLabel: ticket.tableLabel ?? ticket.tableNumber ?? null,
     customerName: ticket.customerName ?? null,
     items: (ticket.orderItems ?? []).map((oi) => ({
       name: oi.menu?.name ?? 'Item',

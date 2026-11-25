@@ -1,9 +1,20 @@
 import { registerAs } from '@nestjs/config';
 
+/** Parse the TRUST_PROXY env value into an Express setting. */
+export function parseTrustProxy(value: string | undefined): boolean | number | undefined {
+  if (!value) return undefined;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  const hops = Number(value);
+  return Number.isInteger(hops) && hops >= 0 ? hops : undefined;
+}
+
 export default registerAs('app', () => ({
   nodeEnv: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '3000', 10),
   apiPrefix: process.env.API_PREFIX || 'v1',
+  // Express "trust proxy": true/false or a hop count (e.g. "1").
+  trustProxy: process.env.TRUST_PROXY ?? '',
   jwt: {
     secret: process.env.JWT_SECRET || 'change-me-in-production-min-32-chars',
     accessExpiry: process.env.JWT_ACCESS_EXPIRY || '15m',

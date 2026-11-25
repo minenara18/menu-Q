@@ -41,6 +41,8 @@ const CheckoutSchema = z.object({
   customerName: z.string().optional(),
   orderType: z.nativeEnum(OrderType),
   tableNumber: z.string().optional(),
+  tableLabel: z.string().max(100).optional(),
+  clientTicketId: z.string().uuid().optional(),
   payments: z.array(CheckoutPaymentSchema).min(1),
   idempotencyKey: z.string().uuid(),
   discount: DiscountSchema.optional(),

@@ -50,6 +50,8 @@ interface CheckoutDto {
   customerName?: string;
   orderType: OrderType;
   tableNumber?: string;
+  tableLabel?: string;
+  clientTicketId?: string;
   payments: CheckoutPayment[];
   idempotencyKey: string;
   discount?: { type: 'amount' | 'percent'; value: number };
@@ -76,11 +78,12 @@ export class OrdersService {
       throw new BadRequestException('No active shift in token. Open a shift and sign in again.');
     }
 
+    const idemKey = dto.clientTicketId ?? dto.idempotencyKey;
     const requestHash = this.hashRequest(dto);
 
     // Per-outlet idempotency record carrying a hash of the request body.
     const existingKey = await this.prisma.idempotencyKey.findUnique({
-      where: { outletId_key: { outletId, key: dto.idempotencyKey } },
+      where: { outletId_key: { outletId, key: idemKey } },
     });
 
     if (existingKey) {
@@ -107,7 +110,7 @@ export class OrdersService {
     // Legacy support: keys created before the IdempotencyKey table existed are
     // still found on the first payment row. Checked only when no new record exists.
     const existingPayment = await this.prisma.payment.findUnique({
-      where: { idempotencyKey: dto.idempotencyKey },
+      where: { idempotencyKey: idemKey },
     });
 
     if (existingPayment) {
@@ -225,7 +228,7 @@ export class OrdersService {
       await tx.idempotencyKey.create({
         data: {
           outletId,
-          key: dto.idempotencyKey,
+          key: idemKey,
           requestHash,
         },
       });
@@ -249,6 +252,8 @@ export class OrdersService {
           customerName: dto.customerName,
           orderType: dto.orderType as unknown as PrismaOrderType,
           tableNumber: dto.tableNumber,
+          tableLabel: dto.tableLabel,
+          clientTicketId: dto.clientTicketId ?? null,
           status: 'ORDERED',
           etaMin: eta.min,
           etaMax: eta.max,
@@ -262,7 +267,7 @@ export class OrdersService {
 
       // Link the claimed idempotency key to the created ticket.
       await tx.idempotencyKey.update({
-        where: { outletId_key: { outletId, key: dto.idempotencyKey } },
+        where: { outletId_key: { outletId, key: idemKey } },
         data: { ticketId: ticket.id },
       });
 
@@ -313,8 +318,8 @@ export class OrdersService {
             amount: payment.amount,
             status: String(payment.method) === 'QRIS' ? 'PENDING' : 'PAID',
             splitGroupId: payment.splitGroupId,
-            qrisRef: payment.method === PaymentMethod.QRIS ? dto.idempotencyKey : null,
-            idempotencyKey: keyAssigned ? null : dto.idempotencyKey,
+            qrisRef: payment.method === PaymentMethod.QRIS ? idemKey : null,
+            idempotencyKey: keyAssigned ? null : idemKey,
           },
         });
         keyAssigned = true;
@@ -333,7 +338,7 @@ export class OrdersService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         // Check the new per-outlet key first so a different body yields 422.
         const existingKey = await this.prisma.idempotencyKey.findUnique({
-          where: { outletId_key: { outletId, key: dto.idempotencyKey } },
+          where: { outletId_key: { outletId, key: idemKey } },
         });
         if (existingKey) {
           if (existingKey.requestHash !== requestHash) {
@@ -357,7 +362,7 @@ export class OrdersService {
         }
         // Legacy key from before the IdempotencyKey table existed.
         const existingPayment = await this.prisma.payment.findUnique({
-          where: { idempotencyKey: dto.idempotencyKey },
+          where: { idempotencyKey: idemKey },
         });
         if (existingPayment) {
           const existingTicket = await this.prisma.ticket.findUnique({
@@ -520,6 +525,8 @@ export class OrdersService {
       customerName: dto.customerName ?? null,
       orderType: dto.orderType,
       tableNumber: dto.tableNumber ?? null,
+      tableLabel: dto.tableLabel ?? null,
+      clientTicketId: dto.clientTicketId ?? null,
       payments: dto.payments.map((p) => ({
         method: p.method,
         amount: p.amount,

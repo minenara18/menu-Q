@@ -791,6 +791,46 @@ describe('Order-Q API (integration, separate DB)', () => {
     expect(replay.body.ticket.id).toBe(first.body.ticket.id);
   });
 
+  it('mobile: clientTicketId acts as idempotency key and tableLabel reaches the receipt', async () => {
+    const { token } = await openShiftAndRelogin(ADI);
+    const clientTicketId = IDEM();
+    const body = {
+      ...checkoutBody([{ menuId: KOPI_SUSU, qty: 1 }], [{ method: 'CASH', amount: 20979 }], IDEM()),
+      clientTicketId,
+      tableLabel: 'Meja 7 (depan)',
+    };
+
+    const first = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', body.idempotencyKey)
+      .send(body);
+    expect(first.status).toBe(200);
+    const ticketId = first.body.ticket.id as string;
+
+    // A different Idempotency-Key header is ignored when clientTicketId is present.
+    const replay = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', IDEM())
+      .send(body);
+    expect(replay.status).toBe(200);
+    expect(replay.body.ticket.id).toBe(ticketId);
+
+    const conflict = await request(server)
+      .post('/v1/orders/checkout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', IDEM())
+      .send({ ...body, tableLabel: 'Meja 8' });
+    expect(conflict.status).toBe(422);
+
+    const receipt = await request(server)
+      .get(`/v1/tickets/${ticketId}/receipt`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(receipt.status).toBe(200);
+    expect(receipt.body.receipt.tableLabel).toBe('Meja 7 (depan)');
+  });
+
   it('concurrency: two-ingredient menus ordered in opposite orders do not deadlock or oversell', async () => {
     const { token } = await openShiftAndRelogin(ADI);
 

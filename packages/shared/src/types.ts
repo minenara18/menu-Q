@@ -138,6 +138,8 @@ export interface Ticket extends BaseEntity {
   customerName?: string;
   orderType: OrderType;
   tableNumber?: string;
+  tableLabel?: string;
+  clientTicketId?: string;
   status: TicketStatus;
   etaMin?: number;
   etaMax?: number;
@@ -299,6 +301,8 @@ export const CheckoutRequestSchema = z.object({
   customerName: z.string().optional(),
   orderType: z.nativeEnum(OrderType),
   tableNumber: z.string().optional(),
+  tableLabel: z.string().optional(),
+  clientTicketId: z.string().uuid().optional(),
   payments: z.array(CheckoutPaymentSchema).min(1),
   idempotencyKey: z.string().uuid(),
   discount: DiscountSchema.optional(),
@@ -333,6 +337,7 @@ export const CheckoutResponseSchema = z.object({
     serviceAmount: z.number(),
     discountAmount: z.number(),
     total: z.number(),
+    tableLabel: z.string().optional(),
     payments: z.array(z.object({
       method: z.nativeEnum(PaymentMethod),
       amount: z.number(),

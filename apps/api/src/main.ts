@@ -3,6 +3,7 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { configureSwagger, shouldEnableDocs } from './config/swagger';
+import { parseTrustProxy } from './config/app.config';
 
 const logger = new Logger('Bootstrap');
 
@@ -39,6 +40,11 @@ async function bootstrap() {
       logger.error('FATAL: JWT_SECRET must be set to a strong random value in production (the code default is not acceptable). Refusing to boot.');
       process.exit(1);
     }
+  }
+
+  const trustProxy = parseTrustProxy(configService.get<string>('app.trustProxy'));
+  if (trustProxy !== undefined) {
+    app.getHttpAdapter().getInstance().set('trust proxy', trustProxy);
   }
 
   const apiPrefix = configService.get<string>('app.apiPrefix') ?? 'v1';

@@ -305,6 +305,9 @@ model Ticket {
   customerName    String?
   orderType       OrderType
   tableNumber     String?
+  tableLabel      String?
+  // Mobile-generated id, unique per outlet, used as an idempotency key.
+  clientTicketId  String?
   status          TicketStatus @default(DRAFT)
   etaMin          Int?
   etaMax          Int?
@@ -324,6 +327,7 @@ model Ticket {
 
   @@unique([shiftId, dailyNo])
   @@unique([ticketNumber, shiftId])
+  @@unique([outletId, clientTicketId])
   @@index([outletId, shiftId, status])
   @@index([outletId, createdAt])
   @@index([status])
