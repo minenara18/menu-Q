@@ -26,6 +26,7 @@ jobs:
 
     env:
       NODE_ENV: test
+      TZ: UTC
       DATABASE_URL: postgresql://orderq:orderq_ci_password@localhost:5432/orderq?schema=public
       DATABASE_URL_TEST: postgresql://orderq:orderq_ci_password@localhost:5432/orderq_test?schema=public
       JWT_SECRET: ci-only-secret-at-least-32-characters-long-000
@@ -43,18 +44,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Wait for PostgreSQL
+        run: |
+          for i in $(seq 1 30); do
+            if PGPASSWORD=orderq_ci_password pg_isready -h localhost -U orderq -d orderq; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+
       - name: Create isolated test database
         run: PGPASSWORD=orderq_ci_password psql -h localhost -U orderq -d orderq -c 'CREATE DATABASE orderq_test;'
-
-      - name: Apply migrations (dev-like DB)
-        run: npx prisma migrate deploy
-        working-directory: apps/api
-
-      - name: Apply migrations (test DB)
-        run: npx prisma migrate deploy
-        working-directory: apps/api
-        env:
-          DATABASE_URL: ${{ env.DATABASE_URL_TEST }}
 
       - name: Generate Prisma client
         run: npx prisma generate
@@ -71,6 +70,16 @@ jobs:
 
       - name: Unit tests
         run: npm test --workspace @order-q/api
+
+      - name: Apply migrations (dev-like DB)
+        run: npx prisma migrate deploy
+        working-directory: apps/api
+
+      - name: Apply migrations (test DB)
+        run: npx prisma migrate deploy
+        working-directory: apps/api
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL_TEST }}
 
       - name: Integration tests
         run: npm run test:integration --workspace @order-q/api
