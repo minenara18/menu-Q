@@ -38,9 +38,22 @@ membawa `shiftId` (checkout menolak 400 tanpa shift aktif di token).
 ## Uang & pembulatan
 
 Semua amount integer rupiah; tarif pajak/service integer basis points (1100 = 11%).
-Satu sumber kebenaran: `apps/api/src/common/money.ts`. Urutan: subtotal → pajak →
-service → diskon (diskon atas subtotal+pajak+service), tiap komponen dibulatkan half-up.
+Satu sumber kebenaran: `apps/api/src/common/money.ts`. Urutan: **diskon → service → pajak**:
+diskon dihitung dari subtotal, service dari subtotal setelah diskon, pajak dari
+subtotal−diskon+service. Tiap komponen dibulatkan ke rupiah terdekat (half-up).
 `allocateSplit(total, n)` memakai largest-remainder sehingga jumlah bagian persis = total.
+
+## Zona waktu & mobile
+
+Batas hari untuk nomor tiket/shift/laporan memakai `Outlet.timezone` (default
+`Asia/Jakarta`) lewat fungsi murni `common/time/outlet-time.ts` — hasil tidak bergantung
+`TZ` mesin. Checkout menerima `clientTicketId` (UUID, unik per outlet; dipakai sebagai
+kunci idempotensi bersama `Idempotency-Key`), `customerName`, dan `tableLabel` (string
+bebas; ikut ke struk). `TRUST_PROXY` mengatur Express trust proxy.
+
+WebSocket mewajibkan JWT. Maker hanya bisa masuk room stasiunnya; layar display
+memakai token read-only dari `POST /v1/auth/display-token` dan hanya menerima
+`ticket:ready` / `ticket:eta-updated` berisi nomor, status, dan ETA.
 
 ## Test
 
@@ -54,19 +67,22 @@ npm run test:integration --workspace @order-q/api
 CI GitHub Actions (`.github/workflows/ci.yml`) menjalankan keempatnya pada push/PR dengan
 service container PostgreSQL. **Status CI TIDAK TERVERIFIKASI** sampai run pertama di GitHub terlihat.
 
-Terakhir dijalankan lokal: build 0 error, lint 0 error, **unit 41/41**, **integrasi 29/29**.
-Integration mencakup konkurensi (stok 1 porsi dan kombinasi terbalik A,B vs B,A), idempotensi
-(dalam+lintas outlet, 422 untuk body beda), QRIS timeout aman multi-instance, refresh reuse,
-lockout persisten, split payment, tutup shift, RBAC multi-stasiun, WAIT_ALL & CALL_PER_STATION,
-ETA/EMA, receipt/reprint, dan webhook Xendit.
+Terakhir dijalankan lokal: build 0 error, lint 0 error, **unit 48/48**, **integrasi 33/33**
+(dijalankan juga dengan `TZ=UTC` dan `TZ=Asia/Jakarta`). Integration mencakup konkurensi
+(stok 1 porsi dan kombinasi terbalik A,B vs B,A), idempotensi `clientTicketId`+header
+(422 untuk body beda), QRIS timeout aman multi-instance, refresh reuse, lockout persisten,
+split payment, tutup shift, RBAC multi-stasiun, WAIT_ALL & CALL_PER_STATION, ETA/EMA,
+receipt/reprint, isolasi room WebSocket + token display, dan webhook Xendit.
 
 ## Endpoint penting
 
 - `GET /health`, `GET /health/ready` (tanpa auth, bebas throttler)
-- `POST /v1/auth/pin-login`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `GET /v1/auth/me`
+- `POST /v1/auth/pin-login`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`,
+  `POST /v1/auth/display-token`, `GET /v1/auth/me`
 - `POST /v1/shifts/open`, `GET /v1/shifts/current`, `GET /v1/shifts/:id/summary`, `POST /v1/shifts/:id/close`
 - `GET/POST /v1/menus`, `GET/POST /v1/ingredients`, `GET/PUT /v1/recipes/:menuId`, `POST /v1/stock/check`
-- `POST /v1/orders/checkout` (header `idempotency-key: uuid`), `POST /v1/orders/validate`
+- `POST /v1/orders/checkout` (header `idempotency-key: uuid` atau field `clientTicketId`),
+  `POST /v1/orders/validate`
 - `GET /v1/tickets`, `GET /v1/tickets/:id/receipt?width=32|48`, `POST /v1/tickets/:id/reprint`
 - `POST /v1/tickets/subtickets/:id/priority/bump`, `PATCH /v1/tickets/subtickets/:id/status`,
   `POST /v1/tickets/:id/complete`, `POST /v1/tickets/:id/cancel`
@@ -83,11 +99,12 @@ Belum / di luar scope:
 - **Mobile: 0 layar** dan **Fase 3 offline-first** belum dikerjakan.
 - Xendit baru diverifikasi HMAC lokal (mock gateway yang diuji), bukan sandbox nyata.
 - Printer fisik dikerjakan di mobile; backend hanya menyiapkan data/byte ESC/POS.
-- Notifikasi/customer-facing display belum ada.
+- Customer-facing display baru di level kontrak/token & event; layar mobile belum dibuat.
 
 ## Utang tersisa
 
 - ~216 lint warning (0 error); aturan promise ketat sudah ERROR pada modul kritis.
 - Refund tunai penuh (belum partial refund).
 - `User.stationId` dipertahankan untuk kompatibilitas transisi (di samping `UserStation`).
-- CI GitHub Actions belum pernah dijalankan → status TIDAK TERVERIFIKASI.
+- CI GitHub Actions: workflow sudah ada dan diperbaiki urutannya; status run terbaru harus dicek
+  di tab Actions / API publik GitHub.
