@@ -6,7 +6,7 @@
     "orientation": "default",
     "userInterfaceStyle": "automatic",
     "sdkVersion": "58.0.0",
-    "platforms": ["ios", "android"],
+    "platforms": ["ios", "android", "web"],
     "ios": { "supportsTablet": true },
     "android": {},
     "web": { "bundler": "metro" },

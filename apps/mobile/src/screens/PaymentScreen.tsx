@@ -21,6 +21,7 @@ export function PaymentScreen({ navigation }: NativeStackScreenProps<RootStackPa
   const [total, setTotal] = useState(subtotal);
   const [paid, setPaid] = useState(String(subtotal));
   const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
   const [eta, setEta] = useState<{ min: number; max: number } | null>(null);
 
   useEffect(() => {
@@ -37,8 +38,9 @@ export function PaymentScreen({ navigation }: NativeStackScreenProps<RootStackPa
         setTotal(result.total);
         setPaid(String(result.total));
         setEta(result.eta);
+        setReady(true);
       } catch {
-        // Biarkan total sementara; kesalahan akan muncul saat checkout.
+        setReady(false);
       }
     })();
     return () => {
@@ -88,8 +90,13 @@ export function PaymentScreen({ navigation }: NativeStackScreenProps<RootStackPa
         style={[styles.input, { borderColor: theme.border, color: theme.ink }]}
       />
       <View style={styles.quick}>
-        {[total, Math.ceil(total / 10000) * 10000, Math.ceil(total / 50000) * 50000].map((v) => (
-          <PrimaryButton key={v} mode="light" label={formatIDR(v)} onPress={() => setPaid(String(v))} />
+        {[total, Math.ceil(total / 10000) * 10000, Math.ceil(total / 50000) * 50000].map((v, index) => (
+          <PrimaryButton
+            key={`${index}-${v}`}
+            mode="light"
+            label={formatIDR(v)}
+            onPress={() => setPaid(String(v))}
+          />
         ))}
       </View>
       <Text style={[styles.change, { color: theme.ink }]}>
@@ -101,7 +108,7 @@ export function PaymentScreen({ navigation }: NativeStackScreenProps<RootStackPa
       <PrimaryButton
         mode="light"
         label={strings.payment.pay}
-        disabled={Number(paid) < total || lines.length === 0}
+        disabled={!ready || Number(paid) < total || lines.length === 0}
         onPress={() => void pay()}
       />
     </ScrollView>

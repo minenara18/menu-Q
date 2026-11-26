@@ -13,6 +13,12 @@ import { ConfigService } from '@nestjs/config';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+// Dev web origin boleh diizinkan lewat env; produksi tidak berubah bila kosong.
+const configuredSocketOrigins = (process.env.SOCKET_CORS_ORIGIN ?? '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 interface SocketUser {
   sub: string;
   outletId: string;
@@ -37,7 +43,7 @@ interface AuthenticatedSocket extends Socket {
  */
 @Injectable()
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: { origin: configuredSocketOrigins.length ? configuredSocketOrigins : '*' },
   namespace: '/',
 })
 export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnect {

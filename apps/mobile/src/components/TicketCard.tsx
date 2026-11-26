@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { palette, radius, space, typography, getTheme, type ThemeMode } from '../theme/tokens';
 import type { QueueTicket } from '../realtime/events';
@@ -21,7 +21,11 @@ export function TicketCard({ ticket, mode = 'dark', compact = false, onPress }: 
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    Animated.timing(opacity, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: Platform.OS !== 'web',
+    }).start();
   }, [opacity]);
 
   return (

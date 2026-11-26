@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
+import { getToken, setToken, deleteToken } from './secure-token';
 
 export type DeviceRole = 'CASHIER' | 'KDS' | 'DISPLAY';
 
@@ -50,14 +50,14 @@ export function getBaseUrl(): string {
 }
 
 export const tokens = {
-  get: () => SecureStore.getItemAsync(TOKEN_KEY),
-  set: (value: string) => SecureStore.setItemAsync(TOKEN_KEY, value),
-  getRefresh: () => SecureStore.getItemAsync(REFRESH_KEY),
-  setRefresh: (value: string) => SecureStore.setItemAsync(REFRESH_KEY, value),
-  getDisplay: () => SecureStore.getItemAsync(DISPLAY_KEY),
-  setDisplay: (value: string) => SecureStore.setItemAsync(DISPLAY_KEY, value),
+  get: () => getToken(TOKEN_KEY),
+  set: (value: string) => setToken(TOKEN_KEY, value),
+  getRefresh: () => getToken(REFRESH_KEY),
+  setRefresh: (value: string) => setToken(REFRESH_KEY, value),
+  getDisplay: () => getToken(DISPLAY_KEY),
+  setDisplay: (value: string) => setToken(DISPLAY_KEY, value),
   clear: async () => {
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
-    await SecureStore.deleteItemAsync(REFRESH_KEY);
+    await deleteToken(TOKEN_KEY);
+    await deleteToken(REFRESH_KEY);
   },
 };

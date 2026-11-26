@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { io, Socket } from 'socket.io-client';
 import * as Haptics from 'expo-haptics';
 import type { QueueEvent } from './events';
@@ -45,6 +46,8 @@ export function connectRealtime(serverUrl: string, token: string, handlers: Real
 
 /** Haptic berbeda per event; diam bila perangkat tidak mendukung. */
 export async function vibrateFor(name: string): Promise<void> {
+  // Web/DevTools: tanpa haptic & suara, tidak boleh mengganggu smoke test.
+  if (Platform.OS === 'web') return;
   try {
     if (name === 'ticket:created') await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     else if (name === 'ticket:ready') await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

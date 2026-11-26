@@ -35,6 +35,24 @@ membuka aplikasi. Kode outlet demo: `DEMO01`; PIN: Adi `123456` (kasir), Budi `1
 Sinta `123456` (owner). Pairing Display: owner membuat kode 6 digit dari
 `POST /v1/auth/display-pair-code`, perangkat Display menukarnya legar `POST /v1/auth/display-pair`.
 
+### Mode web & DevTools (alat debug, bukan target rilis)
+
+```bash
+# backend lokal harus berjalan, dengan CORS_ORIGINS/SOCKET_CORS_ORIGIN memuat http://localhost:8081
+npm run web --workspace apps/mobile            # Expo web di http://localhost:8081
+npm run e2e:web --workspace apps/mobile        # Playwright smoke + screenshot
+```
+
+Cara A (DevTools browser biasa): buka `http://localhost:8081`, tekan F12 → tab Console/Network.
+Cara B (React Native DevTools): jalankan `npx expo start --web --dev-client` lalu buka menu
+DevTools dari terminal Expo; untuk inspeksi komponen pakai `npx expo start --web` + Chrome
+DevTools. Token di web **hanya** disimpan di memory browser pada `__DEV__` dengan peringatan
+konsol; native tetap `expo-secure-store`, dan production web menolak fallback. Haptic/suara
+menjadi no-op di web. Web **bukan** pengganti uji di perangkat nyata.
+
+Laporan smoke: `apps/mobile/e2e-web/reports/summary.json` (di-ignore git); tangkapan layar di
+`apps/mobile/e2e-web/screenshots/<layar>-<lebar>.png` (390/768/1100 px, di-ignore git).
+
 Uji alur otomatis terhadap backend lokal: lihat `apps/mobile/docs/e2e.md` dan jalankan
 `node apps/mobile/scripts/e2e-smoke.mjs` saat API berjalan. Kesesuaian visual/haptic di perangkat
 nyata **TIDAK TERVERIFIKASI** — ikuti langkah Expo Go di berkas tersebut.

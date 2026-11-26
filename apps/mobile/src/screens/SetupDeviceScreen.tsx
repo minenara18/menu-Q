@@ -22,7 +22,8 @@ export function SetupDeviceScreen({ navigation }: NativeStackScreenProps<RootSta
     void load().then(() => {
       const saved = useDeviceStore.getState().config;
       if (saved) {
-        navigation.replace(saved.role === 'DISPLAY' ? 'Display' : saved.role === 'KDS' ? 'KDS' : 'Login');
+        // KDS juga perlu login maker; hanya Display yang masuk langsung ke pairing.
+        navigation.replace(saved.role === 'DISPLAY' ? 'Display' : 'Login');
       }
     });
   }, [load, navigation]);

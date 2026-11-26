@@ -19,14 +19,18 @@ export function ShiftScreen({ navigation }: NativeStackScreenProps<RootStackPara
       navigation.replace('Login');
       return;
     }
-    try {
-      await endpoints.openShift(token, Number(cash));
-      // Re-login is not required: PIN login already carries no shift, so the
-      // next checkout re-fetches the current shift via the server-side flow.
-      navigation.replace('Cashier');
-    } catch {
-      setError(strings.shift.openFailed);
+    // Cek dulu agar tidak menghasilkan 409 yang terdengar seperti error.
+    const current = await endpoints.currentShift(token).catch(() => null);
+    if (!current) {
+      try {
+        await endpoints.openShift(token, Number(cash));
+      } catch {
+        setError(strings.shift.openFailed);
+        return;
+      }
     }
+    // Server menurunkan shift aktif saat checkout; tidak perlu login ulang.
+    navigation.replace('Cashier');
   };
 
   return (

@@ -6,6 +6,10 @@ build/
 .expo-shared/
 .turbo/
 coverage/
+apps/mobile/e2e-web/screenshots/
+apps/mobile/e2e-web/reports/
+playwright-report/
+test-results/
 *.tsbuildinfo
 .env
 .env.*
